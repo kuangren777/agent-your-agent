@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=45"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "aya"
+version = "0.1.0"
+description = "AYA (Agent Your Agent) — multi-agent orchestration via Claude Code CLI"
+requires-python = ">=3.8"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
