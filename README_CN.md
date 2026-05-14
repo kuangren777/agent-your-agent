@@ -1,10 +1,10 @@
-**English** | [中文](README_CN.md)
+[English](README.md) | **中文**
 
 # AYA — Agent Your Agent
 
-> Your agent that manages other agents.
+> 管理其他 Agent 的 Agent。
 
-AYA turns your [Claude Code](https://claude.com/claude-code) session into a **Project Manager** that decomposes tasks, picks the best model for each sub-task, and coordinates parallel workers — all through a file-system protocol.
+AYA 将你的 [Claude Code](https://claude.com/claude-code) 会话转变为一个 **Project Manager**，它能分解任务、为每个子任务选择最合适的模型，并通过文件系统协议协调并行 Worker。
 
 ```
 You: /aya "Build a REST API with user auth, item CRUD, and tests"
@@ -20,59 +20,59 @@ AYA (PM):
 
 ---
 
-## Install
+## 安装
 
-**One-line install** (copies skill + code to `~/.claude/skills/aya/`):
+**一键安装**（将 skill 和代码复制到 `~/.claude/skills/aya/`）：
 
 ```bash
 git clone https://github.com/kuangren777/agent-your-agent.git && cd agent-your-agent && ./install.sh
 ```
 
-**Verify** — restart Claude Code (or `/reload-plugins`), then:
+**验证** — 重启 Claude Code（或执行 `/reload-plugins`），然后输入：
 ```
 /aya
 ```
-You should see AYA enter PM mode and wait for your task.
+你应该会看到 AYA 进入 PM 模式并等待任务。
 
 ---
 
-## Usage
+## 使用方法
 
-### Start AYA
+### 启动 AYA
 
 ```
 /aya "Build a Python calculator with add, subtract, multiply, divide — each in its own module, with tests"
 ```
 
-Or enter PM mode first, then give tasks:
+或先进入 PM 模式，再输入任务：
 ```
 /aya
 > Build a calculator with four operations
 ```
 
-Once activated, **every message you send goes through AYA's multi-agent pipeline** until you say "exit AYA".
+激活后，**你发送的每条消息都会经过 AYA 的多 Agent 流水线处理**，直到你说 "exit AYA"。
 
-### What happens next
+### 接下来会发生什么
 
-AYA automatically:
+AYA 自动执行以下步骤：
 
-1. **Initializes** `.aya/` workspace in your project directory
-2. **Analyzes** your requirements, writes them to `.aya/board/requirements.md`
-3. **Decomposes** into sub-tasks with file ownership declarations:
+1. **初始化** 项目目录中的 `.aya/` 工作空间
+2. **分析** 你的需求，并写入 `.aya/board/requirements.md`
+3. **分解** 为子任务，并声明文件归属：
    ```
    task-001: Implement add/subtract    → owned_files: [src/basic.py]
    task-002: Implement multiply/divide → owned_files: [src/advanced.py]
    task-003: Write tests               → owned_files: [tests/]
    ```
-4. **Routes** each task to the best model (see [Model Routing](#model-routing))
-5. **Spawns workers** in parallel — tasks with no file conflicts run simultaneously
-6. **Monitors** progress via `.aya/mailbox/` messages
-7. **Merges** all worker branches and runs integration tests
-8. **Reports** final results and total cost
+4. **路由** 每个任务到最合适的模型（参见 [Model Routing](#model-routing)）
+5. **并行启动 Worker** — 没有文件冲突的任务同时运行
+6. **监控** 进度，通过 `.aya/mailbox/` 消息传递
+7. **合并** 所有 Worker 分支并运行集成测试
+8. **汇报** 最终结果和总费用
 
-### Give follow-up instructions
+### 发送后续指令
 
-While AYA is running, you can:
+AYA 运行期间，你可以随时输入：
 ```
 > Add input validation to all endpoints
 > The auth module needs JWT, not session-based
@@ -80,7 +80,7 @@ While AYA is running, you can:
 > Show me the cost breakdown
 ```
 
-### Exit AYA
+### 退出 AYA
 
 ```
 > Exit AYA
@@ -90,20 +90,20 @@ While AYA is running, you can:
 
 ## Model Routing
 
-AYA picks the cheapest model that can handle each task:
+AYA 会为每个任务选择能够胜任的最低成本模型：
 
-| Task Type | Model | SWE-bench | Cost ($/M output) | Engine |
-|-----------|-------|-----------|-------------------|--------|
-| Architecture / debugging | Claude Opus 4.7 | 87.6% | $25 | `Agent(model="opus")` |
-| Complex refactoring (>5 files) | Claude Opus 4.7 | 87.6% | $25 | `Agent(model="opus")` |
-| Standard implementation | Deepseek-v4-pro | 80.6% | **$3.48** | `claude --model deepseek-v4-pro` |
-| Code review | Claude Sonnet 4.6 | 79.6% | $15 | `Agent(model="sonnet")` |
-| Tests / boilerplate | GPT-5.5 | 83% | $30 | `codex exec -m gpt-5.5` |
-| Simple edits | Deepseek-v4-pro | 80.6% | **$3.48** | `claude --model deepseek-v4-pro` |
+| 任务类型 | Model | SWE-bench | Cost ($/M output) | Engine |
+|---------|-------|-----------|-------------------|--------|
+| 架构设计 / 调试 | Claude Opus 4.7 | 87.6% | $25 | `Agent(model="opus")` |
+| 复杂重构（>5 个文件） | Claude Opus 4.7 | 87.6% | $25 | `Agent(model="opus")` |
+| 标准实现 | Deepseek-v4-pro | 80.6% | **$3.48** | `claude --model deepseek-v4-pro` |
+| 代码审查 | Claude Sonnet 4.6 | 79.6% | $15 | `Agent(model="sonnet")` |
+| 测试 / 样板代码 | GPT-5.5 | 83% | $30 | `codex exec -m gpt-5.5` |
+| 简单编辑 | Deepseek-v4-pro | 80.6% | **$3.48** | `claude --model deepseek-v4-pro` |
 
-**Cost priority**: Deepseek ($3.48) > Haiku ($5) > Sonnet ($15) > Opus ($25) > GPT-5.5 ($30)
+**成本优先级**：Deepseek ($3.48) > Haiku ($5) > Sonnet ($15) > Opus ($25) > GPT-5.5 ($30)
 
-Models are configured in `.aya/config.json` — add new ones anytime:
+模型配置在 `.aya/config.json` 中，随时可以添加新模型：
 ```json
 {
   "models": {
@@ -119,25 +119,25 @@ Models are configured in `.aya/config.json` — add new ones anytime:
 
 ---
 
-## Parallel Safety
+## 并行安全
 
-Each task declares which files it will modify (`owned_files`) and which it only reads (`read_files`). AYA enforces:
+每个任务声明它将修改的文件（`owned_files`）和只读的文件（`read_files`）。AYA 强制执行以下规则：
 
-- **No two parallel workers share an `owned_file`** — conflicts are detected before spawning
-- **Workers run in isolated git worktrees** — physical filesystem separation
-- **`board/` is read-only for workers** — only PM/TL writes shared context
+- **没有两个并行 Worker 共享同一个 `owned_file`** — 在启动前检测冲突
+- **Worker 在隔离的 git worktree 中运行** — 物理文件系统隔离
+- **`board/` 对 Worker 只读** — 只有 PM/TL 可写入共享上下文
 
 ```
-task-001: owned_files: [src/auth.py]     ← can run in parallel
-task-002: owned_files: [src/api.py]      ← can run in parallel
-task-003: owned_files: [src/auth.py]     ← BLOCKED until task-001 completes
+task-001: owned_files: [src/auth.py]     ← 可以并行运行
+task-002: owned_files: [src/api.py]      ← 可以并行运行
+task-003: owned_files: [src/auth.py]     ← 阻塞，直到 task-001 完成
 ```
 
 ---
 
-## File System Protocol
+## 文件系统协议
 
-All agent communication uses JSON files under `.aya/`:
+所有 Agent 通信使用 `.aya/` 目录下的 JSON 文件：
 
 ```
 .aya/
@@ -157,9 +157,9 @@ All agent communication uses JSON files under `.aya/`:
 └── worktrees/            # Git worktree per worker
 ```
 
-### Message format
+### 消息格式
 
-Workers communicate by writing JSON files to mailboxes:
+Worker 通过向 mailbox 写入 JSON 文件来通信：
 ```json
 {
   "id": "msg-a1b2c3d4",
@@ -180,47 +180,47 @@ Workers communicate by writing JSON files to mailboxes:
 
 ---
 
-## Multi-PM Sessions
+## 多 PM 会话
 
-Multiple AYA sessions can run on the same project without conflicts:
+多个 AYA 会话可以在同一项目上运行，互不冲突：
 
 ```
 Session 1: /aya "Build feature A"  → PM pm-a3f2, workers in mailbox/pm-a3f2--*
 Session 2: /aya "Build feature B"  → PM pm-b7e1, workers in mailbox/pm-b7e1--*
 ```
 
-Each PM has its own mailbox namespace, task set, and worker pool. Shared context lives in `board/`.
+每个 PM 拥有独立的 mailbox 命名空间、任务集和 Worker 池。共享上下文存放在 `board/` 中。
 
-A global registry at `~/.aya-registry.json` tracks all projects and their active PM sessions.
+全局注册表 `~/.aya-registry.json` 追踪所有项目及其活跃的 PM 会话。
 
 ---
 
-## CLI Tools
+## CLI 工具
 
-AYA includes Python utilities that the PM calls via Bash:
+AYA 包含 PM 通过 Bash 调用的 Python 工具：
 
 ```bash
-# Initialize workspace + register PM session
+# 初始化工作空间并注册 PM 会话
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace init --pm-session --task "your task"
 
-# Task management
+# 任务管理
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace write-task '{"task_id":"task-001",...}'
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace list-tasks
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace update-task task-001 '{"status":"done"}'
 
-# Check for file conflicts before parallel spawn
+# 在并行启动前检查文件冲突
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace check-file-conflicts task-001
 
-# Read agent messages
+# 读取 Agent 消息
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace read-inbox pm-a3f2
 
-# View status
+# 查看状态
 PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace status
 ```
 
 ---
 
-## How it works under the hood
+## 底层工作原理
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -249,17 +249,17 @@ PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace status
 
 ---
 
-## Development
+## 开发
 
 ```bash
-# Run tests
+# 运行测试
 PYTHONPATH=src python3 -m pytest tests/ -v
 
-# Test workspace CLI
+# 测试 workspace CLI
 PYTHONPATH=src python3 -m aya.workspace init --pm-session --task "test"
 PYTHONPATH=src python3 -m aya.workspace status
 ```
 
-## License
+## 许可证
 
 MIT
