@@ -2,106 +2,261 @@
 
 > Your agent that manages other agents.
 
-AYA is a lightweight multi-agent orchestration framework built on [Claude Code](https://claude.com/claude-code) CLI. It turns your current Claude Code session into a **Project Manager** that decomposes tasks, routes them to the best model, and coordinates parallel workers — all through a file-system protocol.
-
-## How it works
+AYA turns your [Claude Code](https://claude.com/claude-code) session into a **Project Manager** that decomposes tasks, picks the best model for each sub-task, and coordinates parallel workers — all through a file-system protocol.
 
 ```
-You (Claude Code TUI)
-  │  /aya "Build a REST API with auth"
-  ▼
-PM (your current session)
-  ├── Agent(model="opus")     → complex architecture
-  ├── claude --model deepseek → standard coding (best price-performance)
-  └── codex exec -m gpt-5.5  → test generation
+You: /aya "Build a REST API with user auth, item CRUD, and tests"
+
+AYA (PM):
+  1. Decomposes into 4 tasks
+  2. Routes: auth → Claude Opus, CRUD → Deepseek, tests → GPT-5.5
+  3. Spawns 3 workers in parallel (file-conflict safe)
+  4. Collects results via .hive/mailbox/
+  5. Merges branches, runs integration tests
+  6. Reports: "Done. 4 tasks, 3 workers, $0.42 total cost."
 ```
 
-**Key design principles:**
-- **CLI-native** — orchestration only; Claude Code handles execution
-- **File = Protocol** — all agent communication via `.hive/` JSON files
-- **Multi-model** — routes tasks to the cheapest capable model
-- **Parallel-safe** — `owned_files` prevents concurrent write conflicts
+---
 
-## Quick Start
+## Install
+
+**One-line install** (copies skill + code to `~/.claude/skills/aya/`):
 
 ```bash
-# 1. Clone
-git clone https://github.com/YOUR_USER/aya.git
-cd aya
-
-# 2. Use the /aya skill in any project
-cp -r .claude/skills/aya.md /path/to/your/project/.claude/skills/
-
-# 3. In Claude Code TUI:
-/aya "Build a calculator with add, subtract, multiply, divide"
+git clone https://github.com/kuangren777/agent-your-agent.git && cd agent-your-agent && ./install.sh
 ```
+
+**Verify** — restart Claude Code (or `/reload-plugins`), then:
+```
+/aya
+```
+You should see AYA enter PM mode and wait for your task.
+
+---
+
+## Usage
+
+### Start AYA
+
+```
+/aya "Build a Python calculator with add, subtract, multiply, divide — each in its own module, with tests"
+```
+
+Or enter PM mode first, then give tasks:
+```
+/aya
+> Build a calculator with four operations
+```
+
+Once activated, **every message you send goes through AYA's multi-agent pipeline** until you say "exit AYA".
+
+### What happens next
+
+AYA automatically:
+
+1. **Initializes** `.hive/` workspace in your project directory
+2. **Analyzes** your requirements, writes them to `.hive/board/requirements.md`
+3. **Decomposes** into sub-tasks with file ownership declarations:
+   ```
+   task-001: Implement add/subtract    → owned_files: [src/basic.py]
+   task-002: Implement multiply/divide → owned_files: [src/advanced.py]
+   task-003: Write tests               → owned_files: [tests/]
+   ```
+4. **Routes** each task to the best model (see [Model Routing](#model-routing))
+5. **Spawns workers** in parallel — tasks with no file conflicts run simultaneously
+6. **Monitors** progress via `.hive/mailbox/` messages
+7. **Merges** all worker branches and runs integration tests
+8. **Reports** final results and total cost
+
+### Give follow-up instructions
+
+While AYA is running, you can:
+```
+> Add input validation to all endpoints
+> The auth module needs JWT, not session-based
+> What's the current status?
+> Show me the cost breakdown
+```
+
+### Exit AYA
+
+```
+> Exit AYA
+```
+
+---
 
 ## Model Routing
 
-AYA picks the best model for each sub-task automatically:
+AYA picks the cheapest model that can handle each task:
 
-| Task Type | Model | SWE-bench | Cost (output $/M) |
-|-----------|-------|-----------|-------------------|
-| Architecture / debugging | Claude Opus 4.7 | 87.6% | $25 |
-| Standard implementation | Deepseek-v4-pro | 80.6% | **$3.48** |
-| Code review | Claude Sonnet 4.6 | 79.6% | $15 |
-| Tests / boilerplate | GPT-5.5 | 83% | $30 |
+| Task Type | Model | SWE-bench | Cost ($/M output) | Engine |
+|-----------|-------|-----------|-------------------|--------|
+| Architecture / debugging | Claude Opus 4.7 | 87.6% | $25 | `Agent(model="opus")` |
+| Complex refactoring (>5 files) | Claude Opus 4.7 | 87.6% | $25 | `Agent(model="opus")` |
+| Standard implementation | Deepseek-v4-pro | 80.6% | **$3.48** | `claude --model deepseek-v4-pro` |
+| Code review | Claude Sonnet 4.6 | 79.6% | $15 | `Agent(model="sonnet")` |
+| Tests / boilerplate | GPT-5.5 | 83% | $30 | `codex exec -m gpt-5.5` |
+| Simple edits | Deepseek-v4-pro | 80.6% | **$3.48** | `claude --model deepseek-v4-pro` |
 
-Models are configured in `.hive/config.json` — add new ones anytime.
+**Cost priority**: Deepseek ($3.48) > Haiku ($5) > Sonnet ($15) > Opus ($25) > GPT-5.5 ($30)
 
-## File System Protocol
-
-```
-.hive/
-├── tasks/          # Task specs (PM writes, Workers read)
-├── mailbox/        # JSON messages between agents
-│   ├── pm-{id}/    # PM inbox
-│   └── pm-{id}--worker-{id}/
-├── board/          # Shared context (architecture, API specs)
-├── config.json     # Model registry + routing rules
-├── events.jsonl    # Append-only audit log
-└── state.json      # Current project state
-```
-
-Workers communicate by reading/writing JSON files — works across Claude Code, Deepseek (via claude CLI), and GPT-5.5 (via codex exec).
-
-## CLI Tools
-
-```bash
-export PYTHONPATH=src
-
-# Initialize workspace
-python3 -m hive.workspace init --pm-session --task "your task"
-
-# Task management
-python3 -m hive.workspace write-task '{"task_id":"task-001",...}'
-python3 -m hive.workspace list-tasks
-python3 -m hive.workspace update-task task-001 '{"status":"done"}'
-
-# Parallel safety check
-python3 -m hive.workspace check-file-conflicts task-001
-
-# Communication
-python3 -m hive.workspace send-msg '{"from_agent":"pm","to_agent":"worker-0",...}'
-python3 -m hive.workspace read-inbox pm-a3f2
-
-# Status
-python3 -m hive.workspace status
-```
-
-## Parallel Safety
-
-Each task declares `owned_files` (exclusive write) and `read_files` (shared read). PM checks for conflicts before spawning workers:
-
+Models are configured in `.hive/config.json` — add new ones anytime:
 ```json
 {
-  "task_id": "task-001",
-  "owned_files": ["src/auth.py", "tests/test_auth.py"],
-  "read_files": ["src/config.py"]
+  "models": {
+    "your-new-model": {
+      "engine": "claude-cli",
+      "model_id": "your-model-name",
+      "capabilities": ["implementation", "coding"],
+      "cost_output_per_mtok": 5.0
+    }
+  }
 }
 ```
 
-Two workers with overlapping `owned_files` will never run in parallel.
+---
+
+## Parallel Safety
+
+Each task declares which files it will modify (`owned_files`) and which it only reads (`read_files`). AYA enforces:
+
+- **No two parallel workers share an `owned_file`** — conflicts are detected before spawning
+- **Workers run in isolated git worktrees** — physical filesystem separation
+- **`board/` is read-only for workers** — only PM/TL writes shared context
+
+```
+task-001: owned_files: [src/auth.py]     ← can run in parallel
+task-002: owned_files: [src/api.py]      ← can run in parallel
+task-003: owned_files: [src/auth.py]     ← BLOCKED until task-001 completes
+```
+
+---
+
+## File System Protocol
+
+All agent communication uses JSON files under `.hive/`:
+
+```
+.hive/
+├── config.json           # Model registry + routing rules
+├── state.json            # Project state
+├── pms/                  # PM session registry
+├── tasks/                # Task specs (one JSON per task)
+│   ├── task-001.json
+│   └── task-002.json
+├── mailbox/              # Message passing between agents
+│   ├── pm-a3f2/          # PM's inbox (workers write here)
+│   └── pm-a3f2--worker-0/  # Worker's inbox (PM writes here)
+├── board/                # Shared context (architecture, API specs)
+│   ├── requirements.md
+│   └── architecture.md
+├── events.jsonl          # Append-only audit log
+└── worktrees/            # Git worktree per worker
+```
+
+### Message format
+
+Workers communicate by writing JSON files to mailboxes:
+```json
+{
+  "id": "msg-a1b2c3d4",
+  "ts": "2026-05-14T10:30:00Z",
+  "from_agent": "worker-0",
+  "to_agent": "pm-a3f2",
+  "msg_type": "completion",
+  "subject": "task-001 done",
+  "data": {
+    "task_id": "task-001",
+    "status": "done",
+    "branch": "agent/task-001",
+    "files_changed": ["src/auth.py", "tests/test_auth.py"],
+    "test_result": "pass"
+  }
+}
+```
+
+---
+
+## Multi-PM Sessions
+
+Multiple AYA sessions can run on the same project without conflicts:
+
+```
+Session 1: /aya "Build feature A"  → PM pm-a3f2, workers in mailbox/pm-a3f2--*
+Session 2: /aya "Build feature B"  → PM pm-b7e1, workers in mailbox/pm-b7e1--*
+```
+
+Each PM has its own mailbox namespace, task set, and worker pool. Shared context lives in `board/`.
+
+A global registry at `~/.hive-registry.json` tracks all projects and their active PM sessions.
+
+---
+
+## CLI Tools
+
+AYA includes Python utilities that the PM calls via Bash:
+
+```bash
+# Initialize workspace + register PM session
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace init --pm-session --task "your task"
+
+# Task management
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace write-task '{"task_id":"task-001",...}'
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace list-tasks
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace update-task task-001 '{"status":"done"}'
+
+# Check for file conflicts before parallel spawn
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace check-file-conflicts task-001
+
+# Read agent messages
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace read-inbox pm-a3f2
+
+# View status
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace status
+```
+
+---
+
+## How it works under the hood
+
+```
+┌─────────────────────────────────────────────────┐
+│  Your Claude Code TUI session (= PM)            │
+│                                                 │
+│  /aya "Build X"                                 │
+│    ├── init .hive/, register PM session          │
+│    ├── decompose task, write TaskSpecs           │
+│    ├── route each task to best model             │
+│    │                                             │
+│    ├── Agent(model="opus", worktree, background) │
+│    │     └── Worker 0: complex auth module       │
+│    │                                             │
+│    ├── Bash(background): claude -p --model       │
+│    │     deepseek-v4-pro                         │
+│    │     └── Worker 1: CRUD endpoints            │
+│    │                                             │
+│    ├── Bash(background): codex exec -m gpt-5.5  │
+│    │     └── Worker 2: test generation           │
+│    │                                             │
+│    ├── read .hive/mailbox/pm/ for results        │
+│    ├── merge branches to dev                     │
+│    └── report to user                            │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## Development
+
+```bash
+# Run tests
+PYTHONPATH=src python3 -m pytest tests/ -v
+
+# Test workspace CLI
+PYTHONPATH=src python3 -m hive.workspace init --pm-session --task "test"
+PYTHONPATH=src python3 -m hive.workspace status
+```
 
 ## License
 
