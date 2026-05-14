@@ -1,30 +1,43 @@
 import json
 import os
-import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from aya.models import TaskSpec, create_message, create_task
-from aya.workspace import Workspace
+from aya.workspace import Workspace, AYA_HOME
 
 
 @pytest.fixture
-def ws(tmp_path):
-    w = Workspace(str(tmp_path))
+def ws(tmp_path, monkeypatch):
+    """Redirect AYA_HOME to tmp so tests don't pollute ~/.aya/"""
+    fake_home = tmp_path / "aya-home"
+    monkeypatch.setattr("aya.workspace.AYA_HOME", fake_home)
+    monkeypatch.setattr("aya.workspace.REGISTRY_PATH", fake_home / "registry.json")
+    project = tmp_path / "project"
+    project.mkdir()
+    w = Workspace(str(project))
     w.init("test-project")
     return w
 
 
 class TestInit:
-    def test_creates_dirs(self, ws):
-        aya_dir = ws.aya_dir
-        assert (aya_dir / "tasks").is_dir()
-        assert (aya_dir / "pms").is_dir()
-        assert (aya_dir / "board").is_dir()
-        assert (aya_dir / "mailbox").is_dir()
-        assert (aya_dir / "worktrees").is_dir()
-        assert (aya_dir / "logs").is_dir()
+    def test_creates_runtime_dirs(self, ws):
+        rt = ws.runtime_dir
+        assert rt.is_dir()
+        assert (rt / "tasks").is_dir()
+        assert (rt / "pms").is_dir()
+        assert (rt / "board").is_dir()
+        assert (rt / "mailbox").is_dir()
+        assert (rt / "logs").is_dir()
+
+    def test_runtime_is_outside_repo(self, ws):
+        assert not str(ws.runtime_dir).startswith(str(ws.project_dir))
+
+    def test_creates_symlink(self, ws):
+        link = ws.project_dir / ".aya"
+        assert link.is_symlink() or link.is_dir()
 
     def test_creates_state(self, ws):
         state = ws.load_state()
@@ -40,7 +53,11 @@ class TestInit:
         assert "routing_rules" in config
 
     def test_creates_events_file(self, ws):
-        assert (ws.aya_dir / "events.jsonl").exists()
+        assert (ws.runtime_dir / "events.jsonl").exists()
+
+    def test_creates_project_json(self, ws):
+        pj = json.loads((ws.runtime_dir / "project.json").read_text())
+        assert pj["project_dir"] == str(ws.project_dir)
 
     def test_idempotent(self, ws):
         ws.init("test-project")
@@ -52,8 +69,8 @@ class TestPMSession:
     def test_register_pm(self, ws):
         pm = ws.register_pm("Build feature A")
         assert pm.id.startswith("pm-")
-        assert (ws.aya_dir / "pms" / f"{pm.id}.json").exists()
-        assert (ws.aya_dir / "mailbox" / pm.id).is_dir()
+        assert (ws.runtime_dir / "pms" / f"{pm.id}.json").exists()
+        assert (ws.runtime_dir / "mailbox" / pm.id).is_dir()
 
         state = ws.load_state()
         assert pm.id in state.pm_sessions
@@ -66,12 +83,12 @@ class TestPMSession:
         assert pm1.id in ids
         assert pm2.id in ids
 
-    def test_updates_registry(self, ws):
-        from aya.workspace import REGISTRY_PATH
-
+    def test_updates_registry(self, ws, monkeypatch):
+        import aya.workspace as mod
+        reg_path = mod.REGISTRY_PATH
         pm = ws.register_pm("Test task")
-        assert REGISTRY_PATH.exists()
-        reg = json.loads(REGISTRY_PATH.read_text())
+        assert reg_path.exists()
+        reg = json.loads(reg_path.read_text())
         proj_key = str(ws.project_dir)
         assert proj_key in reg
         assert pm.id in reg[proj_key]["pms"]
@@ -197,8 +214,35 @@ class TestEventLog:
 class TestAgentDirs:
     def test_ensure_agent_dirs(self, ws):
         ws.ensure_agent_dirs("pm-abc1", "worker-0")
-        assert (ws.aya_dir / "mailbox" / "pm-abc1--worker-0").is_dir()
-        assert (ws.aya_dir / "logs" / "worker-0").is_dir()
+        assert (ws.runtime_dir / "mailbox" / "pm-abc1--worker-0").is_dir()
+        assert (ws.runtime_dir / "logs" / "worker-0").is_dir()
+
+
+class TestWorktrees:
+    def test_worktree_path(self, ws):
+        wt = ws.worktree_path("worker-T1")
+        assert str(wt).startswith(str(ws.project_dir))
+        assert ".aya-worktrees" in str(wt)
+
+    def test_list_worktrees_empty(self, ws):
+        assert ws.list_worktrees() == []
+
+    def test_cleanup_empty(self, ws):
+        assert ws.cleanup_worktrees() == 0
+
+
+class TestCheckEnv:
+    def test_detects_missing_tools(self, ws, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda x: None)
+        issues = ws.check_env()
+        engines = [i["engine"] for i in issues]
+        assert any("claude" in e for e in engines)
+        assert any("codex" in e or "GPT" in e for e in engines)
+
+    def test_all_ok(self, ws, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda x: f"/usr/bin/{x}")
+        issues = ws.check_env()
+        assert issues == []
 
 
 class TestStatusTable:
@@ -214,3 +258,4 @@ class TestStatusTable:
         assert pm.id in output
         assert "Auth" in output
         assert "opus" in output
+        assert "Runtime:" in output

@@ -1,23 +1,37 @@
 """
-.aya/ directory management and file I/O.
+AYA runtime workspace — coordination layer lives OUT of the repo.
 
-Usage as CLI tool (called by PM via Bash):
-    python3 -m aya.workspace init [--pm-session] [--name NAME]
+Layout:
+  ~/.aya/runtime/<project-hash>/    coordination (tasks, mailbox, board, events)
+  <project>/.aya-worktrees/         worker git worktrees (cleaned up after completion)
+  <project>/                        main repo (PM reads + merges only)
+  <project>/.aya                    symlink → runtime dir (convenience)
+
+Usage as CLI:
+    python3 -m aya.workspace init [--pm-session] [--name NAME] [--task TASK]
     python3 -m aya.workspace list-pms
-    python3 -m aya.workspace write-task '{"task_id":"...","title":"...",...}'
-    python3 -m aya.workspace update-task TASK_ID '{"status":"done"}'
-    python3 -m aya.workspace send-msg '{"from_agent":"pm","to_agent":"w-0",...}'
+    python3 -m aya.workspace write-task JSON
+    python3 -m aya.workspace update-task TASK_ID JSON
+    python3 -m aya.workspace send-msg JSON
     python3 -m aya.workspace read-inbox AGENT_ID
-    python3 -m aya.workspace log-event '{"actor":"pm","event_type":"task.created",...}'
+    python3 -m aya.workspace log-event JSON
     python3 -m aya.workspace status
     python3 -m aya.workspace list-tasks [--pm PM_ID]
     python3 -m aya.workspace check-file-conflicts TASK_ID
+    python3 -m aya.workspace create-worktree WORKER_ID BRANCH
+    python3 -m aya.workspace remove-worktree WORKER_ID
+    python3 -m aya.workspace cleanup-worktrees
+    python3 -m aya.workspace check-env
+    python3 -m aya.workspace runtime-dir
 """
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -32,50 +46,71 @@ from aya.models import (
     _now_iso,
 )
 
-AYA_DIR_NAME = ".aya"
-REGISTRY_PATH = Path.home() / ".aya-registry.json"
+AYA_HOME = Path.home() / ".aya"
+WORKTREE_DIR_NAME = ".aya-worktrees"
+REGISTRY_PATH = AYA_HOME / "registry.json"
 
 SUBDIRS = [
     "tasks",
     "pms",
     "board",
     "checkpoints",
-    "worktrees",
     "logs",
 ]
 
 
+def _project_hash(project_dir: Path) -> str:
+    return hashlib.sha256(str(project_dir).encode()).hexdigest()[:12]
+
+
 class Workspace:
+    """
+    Coordination state at ~/.aya/runtime/<hash>/, NOT inside the repo.
+    Worker worktrees at <project>/.aya-worktrees/<worker-id>/.
+    """
+
     def __init__(self, project_dir: str = "."):
         self.project_dir = Path(project_dir).resolve()
-        self.aya_dir = self.project_dir / AYA_DIR_NAME
+        self._proj_hash = _project_hash(self.project_dir)
+        self.runtime_dir = AYA_HOME / "runtime" / self._proj_hash
+        self.worktree_dir = self.project_dir / WORKTREE_DIR_NAME
 
     # ------------------------------------------------------------------
     # Init
     # ------------------------------------------------------------------
 
     def exists(self) -> bool:
-        return self.aya_dir.is_dir()
+        return self.runtime_dir.is_dir()
 
     def init(self, project_name: Optional[str] = None) -> AyaState:
         name = project_name or self.project_dir.name
         for d in SUBDIRS:
-            (self.aya_dir / d).mkdir(parents=True, exist_ok=True)
-        # mailbox root (per-pm dirs created on register_pm)
-        (self.aya_dir / "mailbox").mkdir(exist_ok=True)
+            (self.runtime_dir / d).mkdir(parents=True, exist_ok=True)
+        (self.runtime_dir / "mailbox").mkdir(exist_ok=True)
 
-        if (self.aya_dir / "state.json").exists():
+        # symlink .aya → runtime_dir for convenience
+        link = self.project_dir / ".aya"
+        if not link.exists():
+            try:
+                link.symlink_to(self.runtime_dir)
+            except OSError:
+                pass
+
+        if (self.runtime_dir / "state.json").exists():
             return self.load_state()
 
         state = AyaState(project_name=name, started_at=_now_iso())
-        self._write_json(self.aya_dir / "state.json", state.to_dict())
+        self._write_json(self.runtime_dir / "state.json", state.to_dict())
 
-        # default config with model registry
-        if not (self.aya_dir / "config.json").exists():
-            self._write_json(self.aya_dir / "config.json", _default_config())
+        if not (self.runtime_dir / "config.json").exists():
+            self._write_json(self.runtime_dir / "config.json", _default_config())
 
-        # events.jsonl (touch)
-        (self.aya_dir / "events.jsonl").touch()
+        (self.runtime_dir / "events.jsonl").touch()
+
+        self._write_json(
+            self.runtime_dir / "project.json",
+            {"project_dir": str(self.project_dir), "hash": self._proj_hash},
+        )
 
         return state
 
@@ -85,40 +120,37 @@ class Workspace:
 
     def register_pm(self, task: str) -> PMSession:
         pm = create_pm_session(task)
-        self._write_json(self.aya_dir / "pms" / f"{pm.id}.json", pm.to_dict())
-        (self.aya_dir / "mailbox" / pm.id).mkdir(parents=True, exist_ok=True)
+        self._write_json(self.runtime_dir / "pms" / f"{pm.id}.json", pm.to_dict())
+        (self.runtime_dir / "mailbox" / pm.id).mkdir(parents=True, exist_ok=True)
 
-        # update state
         state = self.load_state()
         state.pm_sessions.append(pm.id)
         self.save_state(state)
 
-        # update global registry
         self._update_registry(pm)
-
         return pm
 
     def list_pms(self) -> List[PMSession]:
-        pms_dir = self.aya_dir / "pms"
+        pms_dir = self.runtime_dir / "pms"
         if not pms_dir.exists():
             return []
-        result = []
-        for f in sorted(pms_dir.glob("pm-*.json")):
-            result.append(PMSession.from_dict(self._read_json(f)))
-        return result
+        return [
+            PMSession.from_dict(self._read_json(f))
+            for f in sorted(pms_dir.glob("pm-*.json"))
+        ]
 
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
 
     def load_state(self) -> AyaState:
-        return AyaState.from_dict(self._read_json(self.aya_dir / "state.json"))
+        return AyaState.from_dict(self._read_json(self.runtime_dir / "state.json"))
 
     def save_state(self, state: AyaState) -> None:
-        self._write_json_atomic(self.aya_dir / "state.json", state.to_dict())
+        self._write_json_atomic(self.runtime_dir / "state.json", state.to_dict())
 
     def load_config(self) -> Dict[str, Any]:
-        return self._read_json(self.aya_dir / "config.json")
+        return self._read_json(self.runtime_dir / "config.json")
 
     # ------------------------------------------------------------------
     # Tasks
@@ -127,12 +159,12 @@ class Workspace:
     def write_task(self, task: TaskSpec) -> None:
         task.updated_at = _now_iso()
         self._write_json(
-            self.aya_dir / "tasks" / f"{task.task_id}.json", task.to_dict()
+            self.runtime_dir / "tasks" / f"{task.task_id}.json", task.to_dict()
         )
 
     def read_task(self, task_id: str) -> TaskSpec:
         return TaskSpec.from_dict(
-            self._read_json(self.aya_dir / "tasks" / f"{task_id}.json")
+            self._read_json(self.runtime_dir / "tasks" / f"{task_id}.json")
         )
 
     def update_task(self, task_id: str, patch: Dict[str, Any]) -> TaskSpec:
@@ -145,7 +177,7 @@ class Workspace:
         return task
 
     def list_tasks(self, pm_session: Optional[str] = None) -> List[TaskSpec]:
-        tasks_dir = self.aya_dir / "tasks"
+        tasks_dir = self.runtime_dir / "tasks"
         if not tasks_dir.exists():
             return []
         result = []
@@ -176,21 +208,21 @@ class Workspace:
     # ------------------------------------------------------------------
 
     def send_message(self, msg: Message) -> None:
-        inbox = self.aya_dir / "mailbox" / msg.to_agent
+        inbox = self.runtime_dir / "mailbox" / msg.to_agent
         inbox.mkdir(parents=True, exist_ok=True)
         self._write_json(inbox / msg.filename, msg.to_dict())
 
     def read_inbox(self, agent_id: str) -> List[Message]:
-        inbox = self.aya_dir / "mailbox" / agent_id
+        inbox = self.runtime_dir / "mailbox" / agent_id
         if not inbox.exists():
             return []
-        msgs = []
-        for f in sorted(inbox.glob("*.json")):
-            msgs.append(Message.from_dict(self._read_json(f)))
-        return msgs
+        return [
+            Message.from_dict(self._read_json(f))
+            for f in sorted(inbox.glob("*.json"))
+        ]
 
     def clear_inbox(self, agent_id: str) -> int:
-        inbox = self.aya_dir / "mailbox" / agent_id
+        inbox = self.runtime_dir / "mailbox" / agent_id
         if not inbox.exists():
             return 0
         count = 0
@@ -204,7 +236,7 @@ class Workspace:
     # ------------------------------------------------------------------
 
     def append_event(self, event: Event) -> None:
-        path = self.aya_dir / "events.jsonl"
+        path = self.runtime_dir / "events.jsonl"
         line = event.to_json_line() + "\n"
         with open(path, "a") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
@@ -220,20 +252,103 @@ class Workspace:
         return ev
 
     def read_events(self, n: int = 20) -> List[Event]:
-        path = self.aya_dir / "events.jsonl"
+        path = self.runtime_dir / "events.jsonl"
         if not path.exists():
             return []
         lines = path.read_text().strip().splitlines()
         return [Event.from_json_line(l) for l in lines[-n:]]
 
     # ------------------------------------------------------------------
-    # Worktree helpers
+    # Worktree management — physical isolation per worker
+    # ------------------------------------------------------------------
+
+    def create_worktree(self, worker_id: str, branch: str) -> Path:
+        wt_path = self.worktree_dir / worker_id
+        self.worktree_dir.mkdir(parents=True, exist_ok=True)
+        if wt_path.exists():
+            shutil.rmtree(wt_path)
+        subprocess.run(
+            ["git", "worktree", "add", str(wt_path), "-b", branch],
+            cwd=str(self.project_dir),
+            capture_output=True, text=True, check=True,
+        )
+        return wt_path
+
+    def remove_worktree(self, worker_id: str) -> None:
+        wt_path = self.worktree_dir / worker_id
+        if wt_path.exists():
+            subprocess.run(
+                ["git", "worktree", "remove", str(wt_path), "--force"],
+                cwd=str(self.project_dir),
+                capture_output=True, text=True,
+            )
+            if wt_path.exists():
+                shutil.rmtree(wt_path)
+
+    def cleanup_worktrees(self) -> int:
+        if not self.worktree_dir.exists():
+            return 0
+        count = 0
+        for p in list(self.worktree_dir.iterdir()):
+            if p.is_dir():
+                subprocess.run(
+                    ["git", "worktree", "remove", str(p), "--force"],
+                    cwd=str(self.project_dir),
+                    capture_output=True, text=True,
+                )
+                if p.exists():
+                    shutil.rmtree(p)
+                count += 1
+        if self.worktree_dir.exists():
+            shutil.rmtree(self.worktree_dir)
+        return count
+
+    def worktree_path(self, worker_id: str) -> Path:
+        return self.worktree_dir / worker_id
+
+    def list_worktrees(self) -> List[Dict[str, str]]:
+        if not self.worktree_dir.exists():
+            return []
+        return [
+            {"worker_id": p.name, "path": str(p)}
+            for p in sorted(self.worktree_dir.iterdir())
+            if p.is_dir()
+        ]
+
+    # ------------------------------------------------------------------
+    # Agent dirs
     # ------------------------------------------------------------------
 
     def ensure_agent_dirs(self, pm_id: str, agent_id: str) -> None:
         mailbox_id = f"{pm_id}--{agent_id}" if pm_id else agent_id
-        (self.aya_dir / "mailbox" / mailbox_id).mkdir(parents=True, exist_ok=True)
-        (self.aya_dir / "logs" / agent_id).mkdir(parents=True, exist_ok=True)
+        (self.runtime_dir / "mailbox" / mailbox_id).mkdir(parents=True, exist_ok=True)
+        (self.runtime_dir / "logs" / agent_id).mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Environment check
+    # ------------------------------------------------------------------
+
+    def check_env(self) -> List[Dict[str, str]]:
+        issues = []  # type: List[Dict[str, str]]
+        if not shutil.which("claude"):
+            issues.append({
+                "engine": "claude-agent / claude-cli",
+                "status": "MISSING",
+                "fix": "Install Claude Code: npm install -g @anthropic-ai/claude-code",
+            })
+        if not shutil.which("codex"):
+            issues.append({
+                "engine": "codex (GPT-5.5)",
+                "status": "MISSING",
+                "fix": "Install Codex CLI: npm install -g @openai/codex",
+            })
+        if not shutil.which("git"):
+            issues.append({
+                "engine": "git",
+                "status": "MISSING",
+                "fix": "Install git",
+            })
+        return issues
 
     # ------------------------------------------------------------------
     # Status display
@@ -243,8 +358,11 @@ class Workspace:
         state = self.load_state()
         tasks = self.list_tasks()
         pms = self.list_pms()
+        wts = self.list_worktrees()
 
         lines = [f"Project: {state.project_name}  Status: {state.status}"]
+        lines.append(f"Repo:    {self.project_dir}")
+        lines.append(f"Runtime: {self.runtime_dir}")
         lines.append(f"Total cost: ${state.total_cost_usd:.2f}")
         lines.append("")
 
@@ -266,6 +384,12 @@ class Workspace:
         else:
             lines.append("No tasks.")
 
+        if wts:
+            lines.append("")
+            lines.append("Worktrees:")
+            for wt in wts:
+                lines.append(f"  {wt['worker_id']:20s} {wt['path']}")
+
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -284,7 +408,7 @@ class Workspace:
         os.replace(str(tmp), str(path))
 
     def _next_event_seq(self) -> int:
-        path = self.aya_dir / "events.jsonl"
+        path = self.runtime_dir / "events.jsonl"
         if not path.exists() or path.stat().st_size == 0:
             return 1
         lines = path.read_text().strip().splitlines()
@@ -294,6 +418,7 @@ class Workspace:
         return last.get("seq", 0) + 1
 
     def _update_registry(self, pm: PMSession) -> None:
+        REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
         registry = {}  # type: Dict[str, Any]
         if REGISTRY_PATH.exists():
             try:
@@ -303,7 +428,7 @@ class Workspace:
 
         proj_key = str(self.project_dir)
         if proj_key not in registry:
-            registry[proj_key] = {"pms": {}}
+            registry[proj_key] = {"pms": {}, "runtime": str(self.runtime_dir)}
         registry[proj_key]["pms"][pm.id] = {
             "started": pm.started_at,
             "task": pm.task,
@@ -315,7 +440,7 @@ class Workspace:
 
 
 # ---------------------------------------------------------------------------
-# Default config with model registry
+# Default config
 # ---------------------------------------------------------------------------
 
 def _default_config() -> Dict[str, Any]:
@@ -328,9 +453,6 @@ def _default_config() -> Dict[str, Any]:
                 "swe_bench_verified": 87.6,
                 "cost_input_per_mtok": 5.0,
                 "cost_output_per_mtok": 25.0,
-                "speed": "slow",
-                "context_window": 1000000,
-                "file_access": "full",
             },
             "claude-sonnet": {
                 "engine": "claude-agent",
@@ -339,9 +461,6 @@ def _default_config() -> Dict[str, Any]:
                 "swe_bench_verified": 79.6,
                 "cost_input_per_mtok": 3.0,
                 "cost_output_per_mtok": 15.0,
-                "speed": "fast",
-                "context_window": 1000000,
-                "file_access": "full",
             },
             "claude-haiku": {
                 "engine": "claude-agent",
@@ -350,9 +469,6 @@ def _default_config() -> Dict[str, Any]:
                 "swe_bench_verified": 55.0,
                 "cost_input_per_mtok": 1.0,
                 "cost_output_per_mtok": 5.0,
-                "speed": "fastest",
-                "context_window": 200000,
-                "file_access": "full",
             },
             "deepseek-v4-pro": {
                 "engine": "claude-cli",
@@ -361,9 +477,6 @@ def _default_config() -> Dict[str, Any]:
                 "swe_bench_verified": 80.6,
                 "cost_input_per_mtok": 1.74,
                 "cost_output_per_mtok": 3.48,
-                "speed": "fast",
-                "context_window": 1000000,
-                "file_access": "full",
             },
             "gpt-5.5": {
                 "engine": "codex",
@@ -372,9 +485,6 @@ def _default_config() -> Dict[str, Any]:
                 "swe_bench_verified": 83.0,
                 "cost_input_per_mtok": 5.0,
                 "cost_output_per_mtok": 30.0,
-                "speed": "medium",
-                "context_window": 1000000,
-                "file_access": "sandbox_write",
             },
         },
         "routing_rules": [
@@ -387,24 +497,11 @@ def _default_config() -> Dict[str, Any]:
             {"task_type": "documentation", "prefer": "gpt-5.5", "fallback": "claude-haiku"},
             {"task_type": "debugging", "prefer": "claude-opus", "fallback": "claude-sonnet"},
         ],
-        "engine_configs": {
-            "claude-agent": {
-                "spawn_via": "Agent tool",
-                "permission_mode": "bypassPermissions",
-            },
-            "claude-cli": {
-                "spawn_via": "claude -p --model {model_id} --output-format json --permission-mode bypassPermissions",
-            },
-            "codex": {
-                "spawn_via": "codex exec -m {model_id} --sandbox workspace-write --cd {worktree}",
-                "extra_flags": "--writable-dirs {mailbox_path} {board_path}",
-            },
-        },
     }
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point: python3 -m aya.workspace <command> [args...]
+# CLI
 # ---------------------------------------------------------------------------
 
 def _cli_main() -> None:
@@ -412,7 +509,9 @@ def _cli_main() -> None:
     if not args:
         print("Usage: python3 -m aya.workspace <command> [args]")
         print("Commands: init, list-pms, write-task, update-task, send-msg,")
-        print("          read-inbox, log-event, status, list-tasks, check-file-conflicts")
+        print("          read-inbox, log-event, status, list-tasks,")
+        print("          check-file-conflicts, create-worktree, remove-worktree,")
+        print("          cleanup-worktrees, check-env, runtime-dir")
         sys.exit(1)
 
     cmd = args[0]
@@ -425,7 +524,9 @@ def _cli_main() -> None:
             if a == "--name" and i + 1 < len(args):
                 name = args[i + 1]
         state = ws.init(name)
-        print(f"Initialized .aya/ for project '{state.project_name}'")
+        print(f"Initialized AYA for project '{state.project_name}'")
+        print(f"  Runtime: {ws.runtime_dir}")
+        print(f"  Repo:    {ws.project_dir}")
         if pm_session:
             task_desc = ""
             for i, a in enumerate(args):
@@ -491,6 +592,34 @@ def _cli_main() -> None:
                 print(f"  {c}")
         else:
             print("No file conflicts.")
+
+    elif cmd == "create-worktree":
+        worker_id = args[1]
+        branch = args[2]
+        wt_path = ws.create_worktree(worker_id, branch)
+        print(f"Worktree: {wt_path}")
+
+    elif cmd == "remove-worktree":
+        worker_id = args[1]
+        ws.remove_worktree(worker_id)
+        print(f"Removed worktree for {worker_id}")
+
+    elif cmd == "cleanup-worktrees":
+        count = ws.cleanup_worktrees()
+        print(f"Cleaned up {count} worktrees")
+
+    elif cmd == "check-env":
+        issues = ws.check_env()
+        if issues:
+            print("Environment issues:")
+            for iss in issues:
+                print(f"  [{iss['status']}] {iss['engine']}")
+                print(f"    Fix: {iss['fix']}")
+        else:
+            print("All engines ready.")
+
+    elif cmd == "runtime-dir":
+        print(ws.runtime_dir)
 
     else:
         print(f"Unknown command: {cmd}")
