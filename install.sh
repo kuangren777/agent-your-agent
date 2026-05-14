@@ -1,21 +1,28 @@
 #!/bin/bash
-# AYA (Agent Your Agent) — one-line installer
-# Usage: git clone https://github.com/kuangren777/agent-your-agent.git && cd agent-your-agent && ./install.sh
+# AYA (Agent Your Agent) — installer
+#
+# One-liner:
+#   curl -fsSL https://raw.githubusercontent.com/kuangren777/agent-your-agent/main/install.sh | bash
+#
+# Or:
+#   git clone https://github.com/kuangren777/agent-your-agent.git && cd agent-your-agent && ./install.sh
 
 set -e
 
-SKILL_DIR="$HOME/.claude/skills/aya"
+AYA_HOME="$HOME/.aya"
+AYA_SRC="$AYA_HOME/src"
+CLAUDE_SKILL="$HOME/.claude/skills/aya"
 REPO_URL="https://github.com/kuangren777/agent-your-agent.git"
 
 echo ""
-echo "  ╔═══════════════════════════════════╗"
-echo "  ║   AYA — Agent Your Agent          ║"
-echo "  ║   Multi-agent orchestration for   ║"
-echo "  ║   Claude Code                     ║"
-echo "  ╚═══════════════════════════════════╝"
+echo "  ╔═══════════════════════════════════════╗"
+echo "  ║   AYA — Agent Your Agent              ║"
+echo "  ║   Multi-agent orchestration for       ║"
+echo "  ║   Claude Code & Codex                 ║"
+echo "  ╚═══════════════════════════════════════╝"
 echo ""
 
-# If running from a cloned repo, use local files; otherwise clone to tmp
+# --- Locate source ---
 if [ -f "$(dirname "$0")/src/aya/workspace.py" ]; then
     SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 else
@@ -25,44 +32,70 @@ else
     CLEANUP_SRC=1
 fi
 
-# Create skill directory
-mkdir -p "$SKILL_DIR"
+# --- Core install: ~/.aya/ ---
+echo "[1/3] Installing core to $AYA_HOME"
+mkdir -p "$AYA_HOME"
+rm -rf "$AYA_SRC"
+mkdir -p "$AYA_SRC"
+cp -r "$SRC_DIR/src/aya" "$AYA_SRC/aya"
+rm -rf "$AYA_SRC/aya/__pycache__"
+echo "  ✓ Python package → $AYA_SRC/aya/"
 
-# Copy skill file
-cp "$SRC_DIR/.claude/skills/aya.md" "$SKILL_DIR/SKILL.md"
+# --- Claude Code integration ---
+echo "[2/3] Installing Claude Code skill"
+mkdir -p "$CLAUDE_SKILL"
+cp "$SRC_DIR/.claude/skills/aya.md" "$CLAUDE_SKILL/SKILL.md"
+echo "  ✓ Skill → $CLAUDE_SKILL/SKILL.md"
 
-# Copy Python package
-rm -rf "$SKILL_DIR/aya"
-cp -r "$SRC_DIR/src/aya" "$SKILL_DIR/aya"
-rm -rf "$SKILL_DIR/aya/__pycache__"
+# --- Codex integration ---
+echo "[3/3] Installing Codex instructions"
+CODEX_DIR="$HOME/.codex"
+mkdir -p "$CODEX_DIR"
+if [ ! -f "$CODEX_DIR/instructions.md" ]; then
+    cat > "$CODEX_DIR/instructions.md" << 'CODEX_EOF'
+# AYA — Agent Your Agent
 
-echo "Files installed to $SKILL_DIR"
-echo ""
+When the user says "aya" or asks to use AYA for a task, you are entering AYA PM mode.
 
-# Cleanup if we cloned
+AYA CLI is at: PYTHONPATH=~/.aya/src python3 -m aya.workspace <command>
+
+Run `PYTHONPATH=~/.aya/src python3 -m aya.workspace status` to check current state.
+Run `PYTHONPATH=~/.aya/src python3 -m aya.workspace --help` for all commands.
+
+For full PM instructions, read: ~/.claude/skills/aya/SKILL.md
+CODEX_EOF
+    echo "  ✓ Instructions → $CODEX_DIR/instructions.md"
+else
+    echo "  ⊘ $CODEX_DIR/instructions.md already exists, skipped"
+fi
+
+# --- Cleanup temp clone ---
 if [ "${CLEANUP_SRC:-0}" = "1" ]; then
     rm -rf "$SRC_DIR"
 fi
 
-# Run model setup if no models.json yet
-if [ ! -f "$SKILL_DIR/models.json" ]; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  First-time setup: configure models"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# --- Model setup on first install ---
+if [ ! -f "$AYA_HOME/models.json" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  First-time setup: configure your models"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    PYTHONPATH="$SKILL_DIR" python3 -m aya.workspace setup
+    PYTHONPATH="$AYA_SRC" python3 -m aya.workspace setup
 else
-    echo "Models already configured ($SKILL_DIR/models.json)"
-    echo "To reconfigure: PYTHONPATH=$SKILL_DIR python3 -m aya.workspace setup"
+    echo "Models already configured ($AYA_HOME/models.json)"
+    echo "To reconfigure: PYTHONPATH=~/.aya/src python3 -m aya.workspace setup"
 fi
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Installation complete!"
 echo ""
-echo "  In Claude Code, type:"
-echo "    /aya \"your task here\""
+echo "  Claude Code:  /aya \"your task\""
+echo "  Codex:        mention \"aya\" in prompt"
+echo "  CLI:          PYTHONPATH=~/.aya/src python3 -m aya.workspace status"
 echo ""
-echo "  Or run /aya to enter PM mode"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Update:       PYTHONPATH=~/.aya/src python3 -m aya.workspace self-update"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

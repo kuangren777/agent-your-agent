@@ -443,7 +443,7 @@ class Workspace:
 # Model setup
 # ---------------------------------------------------------------------------
 
-MODELS_FILE = Path.home() / ".claude" / "skills" / "aya" / "models.json"
+MODELS_FILE = AYA_HOME / "models.json"
 
 ENGINE_RULES = {
     "gpt": "codex",
@@ -602,6 +602,7 @@ def get_model_env(model_name: str) -> Dict[str, str]:
 
 REPO_URL = "https://github.com/kuangren777/agent-your-agent.git"
 SKILL_DIR = Path.home() / ".claude" / "skills" / "aya"
+AYA_SRC_DIR = AYA_HOME / "src"
 UPDATE_CHECK_FILE = AYA_HOME / ".last_update_check"
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours
 
@@ -694,24 +695,25 @@ def self_update() -> None:
             print("Already up to date.")
             return
 
-        # Install: copy skill file + code
-        SKILL_DIR.mkdir(parents=True, exist_ok=True)
-
-        skill_src = tmp / ".claude" / "skills" / "aya.md"
-        if skill_src.exists():
-            shutil.copy2(str(skill_src), str(SKILL_DIR / "SKILL.md"))
-
-        code_dst = SKILL_DIR / "aya"
+        # Install core to ~/.aya/src/
+        AYA_SRC_DIR.mkdir(parents=True, exist_ok=True)
+        code_dst = AYA_SRC_DIR / "aya"
         if code_dst.exists():
             shutil.rmtree(code_dst)
         shutil.copytree(str(tmp / "src" / "aya"), str(code_dst))
-
         pycache = code_dst / "__pycache__"
         if pycache.exists():
             shutil.rmtree(pycache)
 
+        # Install Claude Code skill
+        SKILL_DIR.mkdir(parents=True, exist_ok=True)
+        skill_src = tmp / ".claude" / "skills" / "aya.md"
+        if skill_src.exists():
+            shutil.copy2(str(skill_src), str(SKILL_DIR / "SKILL.md"))
+
         print(f"Updated {local_ver} → {remote_ver}")
-        print(f"Installed to {SKILL_DIR}")
+        print(f"Core:  {AYA_SRC_DIR}")
+        print(f"Skill: {SKILL_DIR}")
         print("Run /reload-plugins in Claude Code to pick up the new version.")
 
     finally:

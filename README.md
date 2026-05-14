@@ -22,17 +22,57 @@ AYA (PM):
 
 ## Install
 
-**One-line install** (copies skill + code to `~/.claude/skills/aya/`):
+### Option 1: One-liner (in Claude Code or terminal)
+
+Paste this into Claude Code or your terminal:
+```bash
+git clone https://github.com/kuangren777/agent-your-agent.git /tmp/aya-install && /tmp/aya-install/install.sh && rm -rf /tmp/aya-install
+```
+
+The installer will:
+1. Install core to `~/.aya/src/`
+2. Install Claude Code skill to `~/.claude/skills/aya/`
+3. Install Codex instructions to `~/.codex/`
+4. Walk you through model setup (API keys, Base URLs)
+
+### Option 2: Manual install
 
 ```bash
-git clone https://github.com/kuangren777/agent-your-agent.git && cd agent-your-agent && ./install.sh
+git clone https://github.com/kuangren777/agent-your-agent.git
+cd agent-your-agent
+./install.sh
 ```
 
-**Verify** — restart Claude Code (or `/reload-plugins`), then:
+### What gets installed where
+
 ```
-/aya
+~/.aya/                          Core (Python code + config)
+├── src/aya/                     Python package
+├── models.json                  Model config (keys, URLs)
+├── runtime/                     Per-project coordination data
+└── registry.json                Project registry
+
+~/.claude/skills/aya/SKILL.md    Claude Code skill integration
+~/.codex/instructions.md         Codex integration
 ```
-You should see AYA enter PM mode and wait for your task.
+
+### Verify
+
+Claude Code: type `/aya` — you should see PM mode activate.
+
+Codex: mention "aya" in your prompt.
+
+### Update
+
+```bash
+PYTHONPATH=~/.aya/src python3 -m aya.workspace self-update
+```
+
+### Reconfigure models
+
+```bash
+PYTHONPATH=~/.aya/src python3 -m aya.workspace setup
+```
 
 ---
 

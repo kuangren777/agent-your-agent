@@ -18,7 +18,7 @@ description: "AYA (Agent Your Agent) — multi-agent orchestration via file-syst
 ## 第零步：环境校验
 
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace check-env
+PYTHONPATH=~/.aya/src python3 -m aya.workspace check-env
 ```
 
 如果有引擎未就绪，告知用户缺什么、怎么装。用户可以跳过某些引擎（AYA 会 fallback 到可用模型）。
@@ -26,7 +26,7 @@ PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace check-env
 ## 第一步：初始化 + 注册 PM Session
 
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace init --pm-session --task "$(cat <<'TASK'
+PYTHONPATH=~/.aya/src python3 -m aya.workspace init --pm-session --task "$(cat <<'TASK'
 {用户的原始需求}
 TASK
 )"
@@ -37,10 +37,10 @@ TASK
 - 在项目根创建 `.aya` symlink 指向 runtime（方便查看）
 - 注册 PM session，输出 PM ID
 
-如果已有 PM session：`PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace list-pms`
+如果已有 PM session：`PYTHONPATH=~/.aya/src python3 -m aya.workspace list-pms`
 
 记住 PM ID 和 runtime_dir 路径（后续 Worker prompt 需要）。
-用 `PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace runtime-dir` 获取 runtime 绝对路径。
+用 `PYTHONPATH=~/.aya/src python3 -m aya.workspace runtime-dir` 获取 runtime 绝对路径。
 
 ## 第二步：分析需求 + 拆解任务
 
@@ -48,7 +48,7 @@ TASK
 2. 评估复杂度，决定是否需要 TL 规划
 3. 将每个子任务写为 TaskSpec JSON：
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace write-task '{
+PYTHONPATH=~/.aya/src python3 -m aya.workspace write-task '{
   "task_id": "task-001",
   "title": "实现用户认证模块",
   "description": "...",
@@ -64,7 +64,7 @@ PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace write-task '{
 
 **文件归属**: `owned_files` 不能和其他并行任务重叠。检查：
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace check-file-conflicts task-001
+PYTHONPATH=~/.aya/src python3 -m aya.workspace check-file-conflicts task-001
 ```
 
 **模型路由**:
@@ -96,7 +96,7 @@ Agent({
 
 每个 Worker 先创建独立 worktree：
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace create-worktree worker-{task_id} agent/task-{id}
+PYTHONPATH=~/.aya/src python3 -m aya.workspace create-worktree worker-{task_id} agent/task-{id}
 ```
 这会在 `{project}/.aya-worktrees/worker-{task_id}/` 创建独立 git worktree。
 
@@ -171,7 +171,7 @@ codex exec -m gpt-5.5 \
 
 Worker 完成时你会收到 Agent 工具的后台通知，或读 mailbox：
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace read-inbox {pm_id}
+PYTHONPATH=~/.aya/src python3 -m aya.workspace read-inbox {pm_id}
 ```
 
 处理消息：
@@ -187,18 +187,18 @@ PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace read-inbox {pm_id}
 4. 更新所有 task status
 5. **清理 worktrees**：
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace cleanup-worktrees
+PYTHONPATH=~/.aya/src python3 -m aya.workspace cleanup-worktrees
 ```
 6. 向用户汇报最终结果 + 总成本
 
 ## 事件日志
 
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace log-event '{"actor":"pm","event_type":"task.created","data":{"task_id":"task-001"}}'
+PYTHONPATH=~/.aya/src python3 -m aya.workspace log-event '{"actor":"pm","event_type":"task.created","data":{"task_id":"task-001"}}'
 ```
 
 ## 查看状态
 
 ```bash
-PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace status
+PYTHONPATH=~/.aya/src python3 -m aya.workspace status
 ```
