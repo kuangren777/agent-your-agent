@@ -445,6 +445,63 @@ class Workspace:
 
 REPO_URL = "https://github.com/kuangren777/agent-your-agent.git"
 SKILL_DIR = Path.home() / ".claude" / "skills" / "aya"
+UPDATE_CHECK_FILE = AYA_HOME / ".last_update_check"
+UPDATE_CHECK_INTERVAL = 86400  # 24 hours
+
+
+def check_for_update() -> Optional[str]:
+    """Check if a newer version exists on GitHub. Returns remote version or None.
+    Only checks once per 24h (cached in ~/.aya/.last_update_check)."""
+    import time
+
+    now = time.time()
+    if UPDATE_CHECK_FILE.exists():
+        try:
+            data = json.loads(UPDATE_CHECK_FILE.read_text())
+            if now - data.get("ts", 0) < UPDATE_CHECK_INTERVAL:
+                if data.get("has_update"):
+                    return data.get("remote_ver")
+                return None
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    from aya import __version__ as local_ver
+
+    r = subprocess.run(
+        ["git", "ls-remote", "--tags", REPO_URL],
+        capture_output=True, text=True, timeout=5,
+    )
+
+    remote_ver = None
+    if r.returncode == 0 and r.stdout.strip():
+        tags = [l.split("refs/tags/v")[-1] for l in r.stdout.strip().splitlines() if "refs/tags/v" in l]
+        if tags:
+            remote_ver = sorted(tags)[-1]
+
+    # Fallback: check latest commit's __init__.py via raw URL
+    if not remote_ver:
+        try:
+            r2 = subprocess.run(
+                ["git", "ls-remote", REPO_URL, "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r2.returncode == 0:
+                remote_sha = r2.stdout.strip().split()[0][:7] if r2.stdout.strip() else None
+                # Can't get version from sha alone; mark as "check needed"
+                remote_ver = None
+        except Exception:
+            pass
+
+    has_update = remote_ver is not None and remote_ver != local_ver
+    UPDATE_CHECK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    UPDATE_CHECK_FILE.write_text(json.dumps({
+        "ts": now,
+        "local_ver": local_ver,
+        "remote_ver": remote_ver,
+        "has_update": has_update,
+    }))
+
+    return remote_ver if has_update else None
 
 
 def self_update() -> None:
