@@ -440,6 +440,71 @@ class Workspace:
 
 
 # ---------------------------------------------------------------------------
+# Self-update
+# ---------------------------------------------------------------------------
+
+REPO_URL = "https://github.com/kuangren777/agent-your-agent.git"
+SKILL_DIR = Path.home() / ".claude" / "skills" / "aya"
+
+
+def self_update() -> None:
+    """Pull latest AYA from GitHub and reinstall to ~/.claude/skills/aya/."""
+    import tempfile
+
+    from aya import __version__ as local_ver
+
+    tmp = Path(tempfile.mkdtemp(prefix="aya-update-"))
+    try:
+        print(f"Current version: {local_ver}")
+        print(f"Fetching latest from {REPO_URL} ...")
+
+        r = subprocess.run(
+            ["git", "clone", "--depth", "1", REPO_URL, str(tmp)],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            print(f"Failed to clone: {r.stderr.strip()}")
+            return
+
+        # Read remote version
+        init_file = tmp / "src" / "aya" / "__init__.py"
+        remote_ver = "unknown"
+        if init_file.exists():
+            for line in init_file.read_text().splitlines():
+                if line.startswith("__version__"):
+                    remote_ver = line.split('"')[1]
+
+        print(f"Latest version:  {remote_ver}")
+
+        if remote_ver == local_ver:
+            print("Already up to date.")
+            return
+
+        # Install: copy skill file + code
+        SKILL_DIR.mkdir(parents=True, exist_ok=True)
+
+        skill_src = tmp / ".claude" / "skills" / "aya.md"
+        if skill_src.exists():
+            shutil.copy2(str(skill_src), str(SKILL_DIR / "SKILL.md"))
+
+        code_dst = SKILL_DIR / "aya"
+        if code_dst.exists():
+            shutil.rmtree(code_dst)
+        shutil.copytree(str(tmp / "src" / "aya"), str(code_dst))
+
+        pycache = code_dst / "__pycache__"
+        if pycache.exists():
+            shutil.rmtree(pycache)
+
+        print(f"Updated {local_ver} → {remote_ver}")
+        print(f"Installed to {SKILL_DIR}")
+        print("Run /reload-plugins in Claude Code to pick up the new version.")
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Default config
 # ---------------------------------------------------------------------------
 
@@ -511,7 +576,8 @@ def _cli_main() -> None:
         print("Commands: init, list-pms, write-task, update-task, send-msg,")
         print("          read-inbox, log-event, status, list-tasks,")
         print("          check-file-conflicts, create-worktree, remove-worktree,")
-        print("          cleanup-worktrees, check-env, runtime-dir")
+        print("          cleanup-worktrees, check-env, runtime-dir,")
+        print("          self-update, version")
         sys.exit(1)
 
     cmd = args[0]
@@ -620,6 +686,15 @@ def _cli_main() -> None:
 
     elif cmd == "runtime-dir":
         print(ws.runtime_dir)
+
+    elif cmd == "self-update":
+        self_update()
+        return
+
+    elif cmd == "version":
+        from aya import __version__
+        print(f"AYA {__version__}")
+        return
 
     else:
         print(f"Unknown command: {cmd}")
