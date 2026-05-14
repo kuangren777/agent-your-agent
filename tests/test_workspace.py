@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from hive.models import TaskSpec, create_message, create_task
-from hive.workspace import Workspace
+from aya.models import TaskSpec, create_message, create_task
+from aya.workspace import Workspace
 
 
 @pytest.fixture
@@ -18,13 +18,13 @@ def ws(tmp_path):
 
 class TestInit:
     def test_creates_dirs(self, ws):
-        hive = ws.hive_dir
-        assert (hive / "tasks").is_dir()
-        assert (hive / "pms").is_dir()
-        assert (hive / "board").is_dir()
-        assert (hive / "mailbox").is_dir()
-        assert (hive / "worktrees").is_dir()
-        assert (hive / "logs").is_dir()
+        aya_dir = ws.aya_dir
+        assert (aya_dir / "tasks").is_dir()
+        assert (aya_dir / "pms").is_dir()
+        assert (aya_dir / "board").is_dir()
+        assert (aya_dir / "mailbox").is_dir()
+        assert (aya_dir / "worktrees").is_dir()
+        assert (aya_dir / "logs").is_dir()
 
     def test_creates_state(self, ws):
         state = ws.load_state()
@@ -40,7 +40,7 @@ class TestInit:
         assert "routing_rules" in config
 
     def test_creates_events_file(self, ws):
-        assert (ws.hive_dir / "events.jsonl").exists()
+        assert (ws.aya_dir / "events.jsonl").exists()
 
     def test_idempotent(self, ws):
         ws.init("test-project")
@@ -52,8 +52,8 @@ class TestPMSession:
     def test_register_pm(self, ws):
         pm = ws.register_pm("Build feature A")
         assert pm.id.startswith("pm-")
-        assert (ws.hive_dir / "pms" / f"{pm.id}.json").exists()
-        assert (ws.hive_dir / "mailbox" / pm.id).is_dir()
+        assert (ws.aya_dir / "pms" / f"{pm.id}.json").exists()
+        assert (ws.aya_dir / "mailbox" / pm.id).is_dir()
 
         state = ws.load_state()
         assert pm.id in state.pm_sessions
@@ -67,7 +67,7 @@ class TestPMSession:
         assert pm2.id in ids
 
     def test_updates_registry(self, ws):
-        from hive.workspace import REGISTRY_PATH
+        from aya.workspace import REGISTRY_PATH
 
         pm = ws.register_pm("Test task")
         assert REGISTRY_PATH.exists()
@@ -197,8 +197,8 @@ class TestEventLog:
 class TestAgentDirs:
     def test_ensure_agent_dirs(self, ws):
         ws.ensure_agent_dirs("pm-abc1", "worker-0")
-        assert (ws.hive_dir / "mailbox" / "pm-abc1--worker-0").is_dir()
-        assert (ws.hive_dir / "logs" / "worker-0").is_dir()
+        assert (ws.aya_dir / "mailbox" / "pm-abc1--worker-0").is_dir()
+        assert (ws.aya_dir / "logs" / "worker-0").is_dir()
 
 
 class TestStatusTable:

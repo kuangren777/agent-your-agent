@@ -1,17 +1,17 @@
 """
-.hive/ directory management and file I/O.
+.aya/ directory management and file I/O.
 
 Usage as CLI tool (called by PM via Bash):
-    python3 -m hive.workspace init [--pm-session] [--name NAME]
-    python3 -m hive.workspace list-pms
-    python3 -m hive.workspace write-task '{"task_id":"...","title":"...",...}'
-    python3 -m hive.workspace update-task TASK_ID '{"status":"done"}'
-    python3 -m hive.workspace send-msg '{"from_agent":"pm","to_agent":"w-0",...}'
-    python3 -m hive.workspace read-inbox AGENT_ID
-    python3 -m hive.workspace log-event '{"actor":"pm","event_type":"task.created",...}'
-    python3 -m hive.workspace status
-    python3 -m hive.workspace list-tasks [--pm PM_ID]
-    python3 -m hive.workspace check-file-conflicts TASK_ID
+    python3 -m aya.workspace init [--pm-session] [--name NAME]
+    python3 -m aya.workspace list-pms
+    python3 -m aya.workspace write-task '{"task_id":"...","title":"...",...}'
+    python3 -m aya.workspace update-task TASK_ID '{"status":"done"}'
+    python3 -m aya.workspace send-msg '{"from_agent":"pm","to_agent":"w-0",...}'
+    python3 -m aya.workspace read-inbox AGENT_ID
+    python3 -m aya.workspace log-event '{"actor":"pm","event_type":"task.created",...}'
+    python3 -m aya.workspace status
+    python3 -m aya.workspace list-tasks [--pm PM_ID]
+    python3 -m aya.workspace check-file-conflicts TASK_ID
 """
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from hive.models import (
+from aya.models import (
     Event,
-    HiveState,
+    AyaState,
     Message,
     PMSession,
     TaskSpec,
@@ -32,8 +32,8 @@ from hive.models import (
     _now_iso,
 )
 
-HIVE_DIR_NAME = ".hive"
-REGISTRY_PATH = Path.home() / ".hive-registry.json"
+AYA_DIR_NAME = ".aya"
+REGISTRY_PATH = Path.home() / ".aya-registry.json"
 
 SUBDIRS = [
     "tasks",
@@ -48,34 +48,34 @@ SUBDIRS = [
 class Workspace:
     def __init__(self, project_dir: str = "."):
         self.project_dir = Path(project_dir).resolve()
-        self.hive_dir = self.project_dir / HIVE_DIR_NAME
+        self.aya_dir = self.project_dir / AYA_DIR_NAME
 
     # ------------------------------------------------------------------
     # Init
     # ------------------------------------------------------------------
 
     def exists(self) -> bool:
-        return self.hive_dir.is_dir()
+        return self.aya_dir.is_dir()
 
-    def init(self, project_name: Optional[str] = None) -> HiveState:
+    def init(self, project_name: Optional[str] = None) -> AyaState:
         name = project_name or self.project_dir.name
         for d in SUBDIRS:
-            (self.hive_dir / d).mkdir(parents=True, exist_ok=True)
+            (self.aya_dir / d).mkdir(parents=True, exist_ok=True)
         # mailbox root (per-pm dirs created on register_pm)
-        (self.hive_dir / "mailbox").mkdir(exist_ok=True)
+        (self.aya_dir / "mailbox").mkdir(exist_ok=True)
 
-        if (self.hive_dir / "state.json").exists():
+        if (self.aya_dir / "state.json").exists():
             return self.load_state()
 
-        state = HiveState(project_name=name, started_at=_now_iso())
-        self._write_json(self.hive_dir / "state.json", state.to_dict())
+        state = AyaState(project_name=name, started_at=_now_iso())
+        self._write_json(self.aya_dir / "state.json", state.to_dict())
 
         # default config with model registry
-        if not (self.hive_dir / "config.json").exists():
-            self._write_json(self.hive_dir / "config.json", _default_config())
+        if not (self.aya_dir / "config.json").exists():
+            self._write_json(self.aya_dir / "config.json", _default_config())
 
         # events.jsonl (touch)
-        (self.hive_dir / "events.jsonl").touch()
+        (self.aya_dir / "events.jsonl").touch()
 
         return state
 
@@ -85,8 +85,8 @@ class Workspace:
 
     def register_pm(self, task: str) -> PMSession:
         pm = create_pm_session(task)
-        self._write_json(self.hive_dir / "pms" / f"{pm.id}.json", pm.to_dict())
-        (self.hive_dir / "mailbox" / pm.id).mkdir(parents=True, exist_ok=True)
+        self._write_json(self.aya_dir / "pms" / f"{pm.id}.json", pm.to_dict())
+        (self.aya_dir / "mailbox" / pm.id).mkdir(parents=True, exist_ok=True)
 
         # update state
         state = self.load_state()
@@ -99,7 +99,7 @@ class Workspace:
         return pm
 
     def list_pms(self) -> List[PMSession]:
-        pms_dir = self.hive_dir / "pms"
+        pms_dir = self.aya_dir / "pms"
         if not pms_dir.exists():
             return []
         result = []
@@ -111,14 +111,14 @@ class Workspace:
     # State
     # ------------------------------------------------------------------
 
-    def load_state(self) -> HiveState:
-        return HiveState.from_dict(self._read_json(self.hive_dir / "state.json"))
+    def load_state(self) -> AyaState:
+        return AyaState.from_dict(self._read_json(self.aya_dir / "state.json"))
 
-    def save_state(self, state: HiveState) -> None:
-        self._write_json_atomic(self.hive_dir / "state.json", state.to_dict())
+    def save_state(self, state: AyaState) -> None:
+        self._write_json_atomic(self.aya_dir / "state.json", state.to_dict())
 
     def load_config(self) -> Dict[str, Any]:
-        return self._read_json(self.hive_dir / "config.json")
+        return self._read_json(self.aya_dir / "config.json")
 
     # ------------------------------------------------------------------
     # Tasks
@@ -127,12 +127,12 @@ class Workspace:
     def write_task(self, task: TaskSpec) -> None:
         task.updated_at = _now_iso()
         self._write_json(
-            self.hive_dir / "tasks" / f"{task.task_id}.json", task.to_dict()
+            self.aya_dir / "tasks" / f"{task.task_id}.json", task.to_dict()
         )
 
     def read_task(self, task_id: str) -> TaskSpec:
         return TaskSpec.from_dict(
-            self._read_json(self.hive_dir / "tasks" / f"{task_id}.json")
+            self._read_json(self.aya_dir / "tasks" / f"{task_id}.json")
         )
 
     def update_task(self, task_id: str, patch: Dict[str, Any]) -> TaskSpec:
@@ -145,7 +145,7 @@ class Workspace:
         return task
 
     def list_tasks(self, pm_session: Optional[str] = None) -> List[TaskSpec]:
-        tasks_dir = self.hive_dir / "tasks"
+        tasks_dir = self.aya_dir / "tasks"
         if not tasks_dir.exists():
             return []
         result = []
@@ -176,12 +176,12 @@ class Workspace:
     # ------------------------------------------------------------------
 
     def send_message(self, msg: Message) -> None:
-        inbox = self.hive_dir / "mailbox" / msg.to_agent
+        inbox = self.aya_dir / "mailbox" / msg.to_agent
         inbox.mkdir(parents=True, exist_ok=True)
         self._write_json(inbox / msg.filename, msg.to_dict())
 
     def read_inbox(self, agent_id: str) -> List[Message]:
-        inbox = self.hive_dir / "mailbox" / agent_id
+        inbox = self.aya_dir / "mailbox" / agent_id
         if not inbox.exists():
             return []
         msgs = []
@@ -190,7 +190,7 @@ class Workspace:
         return msgs
 
     def clear_inbox(self, agent_id: str) -> int:
-        inbox = self.hive_dir / "mailbox" / agent_id
+        inbox = self.aya_dir / "mailbox" / agent_id
         if not inbox.exists():
             return 0
         count = 0
@@ -204,7 +204,7 @@ class Workspace:
     # ------------------------------------------------------------------
 
     def append_event(self, event: Event) -> None:
-        path = self.hive_dir / "events.jsonl"
+        path = self.aya_dir / "events.jsonl"
         line = event.to_json_line() + "\n"
         with open(path, "a") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
@@ -220,7 +220,7 @@ class Workspace:
         return ev
 
     def read_events(self, n: int = 20) -> List[Event]:
-        path = self.hive_dir / "events.jsonl"
+        path = self.aya_dir / "events.jsonl"
         if not path.exists():
             return []
         lines = path.read_text().strip().splitlines()
@@ -232,8 +232,8 @@ class Workspace:
 
     def ensure_agent_dirs(self, pm_id: str, agent_id: str) -> None:
         mailbox_id = f"{pm_id}--{agent_id}" if pm_id else agent_id
-        (self.hive_dir / "mailbox" / mailbox_id).mkdir(parents=True, exist_ok=True)
-        (self.hive_dir / "logs" / agent_id).mkdir(parents=True, exist_ok=True)
+        (self.aya_dir / "mailbox" / mailbox_id).mkdir(parents=True, exist_ok=True)
+        (self.aya_dir / "logs" / agent_id).mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Status display
@@ -284,7 +284,7 @@ class Workspace:
         os.replace(str(tmp), str(path))
 
     def _next_event_seq(self) -> int:
-        path = self.hive_dir / "events.jsonl"
+        path = self.aya_dir / "events.jsonl"
         if not path.exists() or path.stat().st_size == 0:
             return 1
         lines = path.read_text().strip().splitlines()
@@ -404,13 +404,13 @@ def _default_config() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point: python3 -m hive.workspace <command> [args...]
+# CLI entry point: python3 -m aya.workspace <command> [args...]
 # ---------------------------------------------------------------------------
 
 def _cli_main() -> None:
     args = sys.argv[1:]
     if not args:
-        print("Usage: python3 -m hive.workspace <command> [args]")
+        print("Usage: python3 -m aya.workspace <command> [args]")
         print("Commands: init, list-pms, write-task, update-task, send-msg,")
         print("          read-inbox, log-event, status, list-tasks, check-file-conflicts")
         sys.exit(1)
@@ -425,7 +425,7 @@ def _cli_main() -> None:
             if a == "--name" and i + 1 < len(args):
                 name = args[i + 1]
         state = ws.init(name)
-        print(f"Initialized .hive/ for project '{state.project_name}'")
+        print(f"Initialized .aya/ for project '{state.project_name}'")
         if pm_session:
             task_desc = ""
             for i, a in enumerate(args):

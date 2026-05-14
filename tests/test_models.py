@@ -1,8 +1,8 @@
 import json
 
-from hive.models import (
+from aya.models import (
     Event,
-    HiveState,
+    AyaState,
     Message,
     PMSession,
     TaskSpec,
@@ -102,10 +102,10 @@ class TestPMSession:
         assert pm2.id == pm.id
 
 
-class TestHiveState:
+class TestAyaState:
     def test_roundtrip(self):
-        s = HiveState(project_name="test", pm_sessions=["pm-abc1"])
+        s = AyaState(project_name="test", pm_sessions=["pm-abc1"])
         d = s.to_dict()
-        s2 = HiveState.from_dict(d)
+        s2 = AyaState.from_dict(d)
         assert s2.project_name == "test"
         assert s2.pm_sessions == ["pm-abc1"]

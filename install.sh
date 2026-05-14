@@ -11,7 +11,7 @@ REPO_URL="https://github.com/kuangren777/agent-your-agent.git"
 echo "Installing AYA (Agent Your Agent)..."
 
 # If running from a cloned repo, use local files; otherwise clone to tmp
-if [ -f "$(dirname "$0")/src/hive/workspace.py" ]; then
+if [ -f "$(dirname "$0")/src/aya/workspace.py" ]; then
     SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 else
     SRC_DIR=$(mktemp -d)
@@ -26,9 +26,9 @@ mkdir -p "$SKILL_DIR"
 cp "$SRC_DIR/.claude/skills/aya.md" "$SKILL_DIR/SKILL.md"
 
 # Copy Python package
-rm -rf "$SKILL_DIR/hive"
-cp -r "$SRC_DIR/src/hive" "$SKILL_DIR/hive"
-rm -rf "$SKILL_DIR/hive/__pycache__"
+rm -rf "$SKILL_DIR/aya"
+cp -r "$SRC_DIR/src/aya" "$SKILL_DIR/aya"
+rm -rf "$SKILL_DIR/aya/__pycache__"
 
 # Cleanup if we cloned
 if [ "${CLEANUP_SRC:-0}" = "1" ]; then
@@ -39,7 +39,7 @@ echo ""
 echo "AYA installed successfully!"
 echo ""
 echo "  Skill:  $SKILL_DIR/SKILL.md"
-echo "  Code:   $SKILL_DIR/hive/"
+echo "  Code:   $SKILL_DIR/aya/"
 echo ""
 echo "Usage: In any Claude Code session, type:"
 echo "  /aya \"Build a REST API with auth\""

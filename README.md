@@ -11,7 +11,7 @@ AYA (PM):
   1. Decomposes into 4 tasks
   2. Routes: auth → Claude Opus, CRUD → Deepseek, tests → GPT-5.5
   3. Spawns 3 workers in parallel (file-conflict safe)
-  4. Collects results via .hive/mailbox/
+  4. Collects results via .aya/mailbox/
   5. Merges branches, runs integration tests
   6. Reports: "Done. 4 tasks, 3 workers, $0.42 total cost."
 ```
@@ -54,8 +54,8 @@ Once activated, **every message you send goes through AYA's multi-agent pipeline
 
 AYA automatically:
 
-1. **Initializes** `.hive/` workspace in your project directory
-2. **Analyzes** your requirements, writes them to `.hive/board/requirements.md`
+1. **Initializes** `.aya/` workspace in your project directory
+2. **Analyzes** your requirements, writes them to `.aya/board/requirements.md`
 3. **Decomposes** into sub-tasks with file ownership declarations:
    ```
    task-001: Implement add/subtract    → owned_files: [src/basic.py]
@@ -64,7 +64,7 @@ AYA automatically:
    ```
 4. **Routes** each task to the best model (see [Model Routing](#model-routing))
 5. **Spawns workers** in parallel — tasks with no file conflicts run simultaneously
-6. **Monitors** progress via `.hive/mailbox/` messages
+6. **Monitors** progress via `.aya/mailbox/` messages
 7. **Merges** all worker branches and runs integration tests
 8. **Reports** final results and total cost
 
@@ -101,7 +101,7 @@ AYA picks the cheapest model that can handle each task:
 
 **Cost priority**: Deepseek ($3.48) > Haiku ($5) > Sonnet ($15) > Opus ($25) > GPT-5.5 ($30)
 
-Models are configured in `.hive/config.json` — add new ones anytime:
+Models are configured in `.aya/config.json` — add new ones anytime:
 ```json
 {
   "models": {
@@ -135,10 +135,10 @@ task-003: owned_files: [src/auth.py]     ← BLOCKED until task-001 completes
 
 ## File System Protocol
 
-All agent communication uses JSON files under `.hive/`:
+All agent communication uses JSON files under `.aya/`:
 
 ```
-.hive/
+.aya/
 ├── config.json           # Model registry + routing rules
 ├── state.json            # Project state
 ├── pms/                  # PM session registry
@@ -189,7 +189,7 @@ Session 2: /aya "Build feature B"  → PM pm-b7e1, workers in mailbox/pm-b7e1--*
 
 Each PM has its own mailbox namespace, task set, and worker pool. Shared context lives in `board/`.
 
-A global registry at `~/.hive-registry.json` tracks all projects and their active PM sessions.
+A global registry at `~/.aya-registry.json` tracks all projects and their active PM sessions.
 
 ---
 
@@ -199,21 +199,21 @@ AYA includes Python utilities that the PM calls via Bash:
 
 ```bash
 # Initialize workspace + register PM session
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace init --pm-session --task "your task"
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace init --pm-session --task "your task"
 
 # Task management
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace write-task '{"task_id":"task-001",...}'
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace list-tasks
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace update-task task-001 '{"status":"done"}'
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace write-task '{"task_id":"task-001",...}'
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace list-tasks
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace update-task task-001 '{"status":"done"}'
 
 # Check for file conflicts before parallel spawn
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace check-file-conflicts task-001
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace check-file-conflicts task-001
 
 # Read agent messages
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace read-inbox pm-a3f2
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace read-inbox pm-a3f2
 
 # View status
-PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace status
+PYTHONPATH=~/.claude/skills/aya python3 -m aya.workspace status
 ```
 
 ---
@@ -225,7 +225,7 @@ PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace status
 │  Your Claude Code TUI session (= PM)            │
 │                                                 │
 │  /aya "Build X"                                 │
-│    ├── init .hive/, register PM session          │
+│    ├── init .aya/, register PM session          │
 │    ├── decompose task, write TaskSpecs           │
 │    ├── route each task to best model             │
 │    │                                             │
@@ -239,7 +239,7 @@ PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace status
 │    ├── Bash(background): codex exec -m gpt-5.5  │
 │    │     └── Worker 2: test generation           │
 │    │                                             │
-│    ├── read .hive/mailbox/pm/ for results        │
+│    ├── read .aya/mailbox/pm/ for results        │
 │    ├── merge branches to dev                     │
 │    └── report to user                            │
 └─────────────────────────────────────────────────┘
@@ -254,8 +254,8 @@ PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace status
 PYTHONPATH=src python3 -m pytest tests/ -v
 
 # Test workspace CLI
-PYTHONPATH=src python3 -m hive.workspace init --pm-session --task "test"
-PYTHONPATH=src python3 -m hive.workspace status
+PYTHONPATH=src python3 -m aya.workspace init --pm-session --task "test"
+PYTHONPATH=src python3 -m aya.workspace status
 ```
 
 ## License

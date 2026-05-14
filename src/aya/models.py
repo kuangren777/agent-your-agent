@@ -184,11 +184,11 @@ def create_pm_session(task: str) -> PMSession:
 
 
 # ---------------------------------------------------------------------------
-# HiveState
+# AyaState
 # ---------------------------------------------------------------------------
 
 @dataclass
-class HiveState:
+class AyaState:
     project_name: str
     status: str = "running"
     pm_sessions: List[str] = field(default_factory=list)
@@ -200,7 +200,7 @@ class HiveState:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> HiveState:
+    def from_dict(cls, d: Dict[str, Any]) -> AyaState:
         known = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in d.items() if k in known})
 
