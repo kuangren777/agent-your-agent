@@ -443,7 +443,7 @@ class Workspace:
 # Model setup
 # ---------------------------------------------------------------------------
 
-MODELS_FILE = AYA_HOME / "models.json"
+MODELS_FILE = Path.home() / ".claude" / "skills" / "aya" / "models.json"
 
 ENGINE_RULES = {
     "gpt": "codex",
