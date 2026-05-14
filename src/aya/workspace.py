@@ -440,6 +440,163 @@ class Workspace:
 
 
 # ---------------------------------------------------------------------------
+# Model setup
+# ---------------------------------------------------------------------------
+
+MODELS_FILE = AYA_HOME / "models.json"
+
+ENGINE_RULES = {
+    "gpt": "codex",
+    "o1": "codex",
+    "o3": "codex",
+    "o4": "codex",
+    "claude": "claude-agent",
+    "opus": "claude-agent",
+    "sonnet": "claude-agent",
+    "haiku": "claude-agent",
+}
+
+
+def _detect_engine(model_name: str) -> str:
+    name_lower = model_name.lower()
+    for prefix, engine in ENGINE_RULES.items():
+        if prefix in name_lower:
+            return engine
+    return "claude-cli"
+
+
+def load_models() -> Dict[str, Any]:
+    if MODELS_FILE.exists():
+        try:
+            return json.loads(MODELS_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_models(models: Dict[str, Any]) -> None:
+    MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MODELS_FILE.write_text(json.dumps(models, ensure_ascii=False, indent=2) + "\n")
+
+
+def setup_models_interactive() -> None:
+    """Interactive model setup wizard."""
+    models = load_models()
+
+    print("AYA Model Setup")
+    print("=" * 40)
+    print()
+
+    # 1. Check Claude (always available via Agent tool)
+    print("[Claude] opus / sonnet / haiku")
+    if shutil.which("claude"):
+        print("  ✓ claude CLI found — ready via Agent tool")
+        for m in ["claude-opus", "claude-sonnet", "claude-haiku"]:
+            if m not in models:
+                models[m] = {
+                    "engine": "claude-agent",
+                    "model_id": m.split("-", 1)[1],
+                    "status": "ready",
+                }
+    else:
+        print("  ✗ claude CLI not found")
+        print("  Fix: npm install -g @anthropic-ai/claude-code")
+    print()
+
+    # 2. Check Codex / GPT
+    print("[GPT] gpt-5.5 / o3 / o4-mini (via Codex)")
+    if shutil.which("codex"):
+        print("  ✓ codex CLI found — ready via codex exec")
+        if "gpt-5.5" not in models:
+            models["gpt-5.5"] = {
+                "engine": "codex",
+                "model_id": "gpt-5.5",
+                "status": "ready",
+            }
+    else:
+        print("  ✗ codex CLI not found")
+        print("  Fix: npm install -g @openai/codex")
+    print()
+
+    # 3. Third-party models
+    print("[Third-party] Deepseek, Qwen, Gemini, etc. (via claude -p)")
+    print("  These use claude CLI with --model flag.")
+    print("  You need to provide: model name, base URL, API key.")
+    print()
+
+    while True:
+        ans = input("  Add a third-party model? (y/n): ").strip().lower()
+        if ans != "y":
+            break
+
+        name = input("  Model name (e.g. deepseek-v4-pro): ").strip()
+        if not name:
+            continue
+
+        base_url = input("  Base URL (e.g. https://api.deepseek.com/v1): ").strip()
+        api_key = input("  API Key: ").strip()
+
+        engine = _detect_engine(name)
+        models[name] = {
+            "engine": engine,
+            "model_id": name,
+            "base_url": base_url or None,
+            "api_key": api_key or None,
+            "status": "configured",
+        }
+        print(f"  ✓ Added {name} (engine: {engine})")
+        print()
+
+    save_models(models)
+
+    ready = [k for k, v in models.items() if v.get("status") in ("ready", "configured")]
+    print()
+    print(f"Saved to {MODELS_FILE}")
+    print(f"{len(ready)} models available: {', '.join(ready)}")
+
+
+def setup_models_noninteractive(name: str, base_url: str = "", api_key: str = "") -> None:
+    """Add a model non-interactively (for scripting / PM use)."""
+    models = load_models()
+    engine = _detect_engine(name)
+    models[name] = {
+        "engine": engine,
+        "model_id": name,
+        "base_url": base_url or None,
+        "api_key": api_key or None,
+        "status": "configured",
+    }
+    save_models(models)
+    print(f"Added {name} (engine: {engine})")
+
+
+def list_models() -> None:
+    """Print all configured models."""
+    models = load_models()
+    if not models:
+        print("No models configured. Run: python3 -m aya.workspace setup")
+        return
+    print(f"{'Name':25s} {'Engine':15s} {'Status':12s} Base URL")
+    print("-" * 75)
+    for name, cfg in models.items():
+        url = cfg.get("base_url") or "-"
+        print(f"{name:25s} {cfg.get('engine','?'):15s} {cfg.get('status','?'):12s} {url}")
+
+
+def get_model_env(model_name: str) -> Dict[str, str]:
+    """Return environment variables needed to use a model via claude -p.
+    PM passes these when spawning a claude-cli worker."""
+    models = load_models()
+    cfg = models.get(model_name, {})
+    env = {}
+    if cfg.get("base_url"):
+        env["OPENAI_BASE_URL"] = cfg["base_url"]
+    if cfg.get("api_key"):
+        env["OPENAI_API_KEY"] = cfg["api_key"]
+    return env
+
+
+# ---------------------------------------------------------------------------
 # Self-update
 # ---------------------------------------------------------------------------
 
@@ -634,7 +791,7 @@ def _cli_main() -> None:
         print("          read-inbox, log-event, status, list-tasks,")
         print("          check-file-conflicts, create-worktree, remove-worktree,")
         print("          cleanup-worktrees, check-env, runtime-dir,")
-        print("          self-update, version")
+        print("          setup, models, model-env, self-update, version")
         sys.exit(1)
 
     cmd = args[0]
@@ -743,6 +900,32 @@ def _cli_main() -> None:
 
     elif cmd == "runtime-dir":
         print(ws.runtime_dir)
+
+    elif cmd == "setup":
+        if len(args) > 1:
+            # Non-interactive: setup MODEL [--base-url URL] [--api-key KEY]
+            model_name = args[1]
+            base_url = ""
+            api_key = ""
+            for i, a in enumerate(args):
+                if a == "--base-url" and i + 1 < len(args):
+                    base_url = args[i + 1]
+                if a == "--api-key" and i + 1 < len(args):
+                    api_key = args[i + 1]
+            setup_models_noninteractive(model_name, base_url, api_key)
+        else:
+            setup_models_interactive()
+        return
+
+    elif cmd == "models":
+        list_models()
+        return
+
+    elif cmd == "model-env":
+        model_name = args[1]
+        env = get_model_env(model_name)
+        print(json.dumps(env))
+        return
 
     elif cmd == "self-update":
         self_update()
