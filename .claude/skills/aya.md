@@ -1,17 +1,22 @@
 ---
 name: aya
-description: "AYA (Agent Your Agent) — multi-agent orchestration via file-system protocol. /aya \"task\" to start."
+description: "AYA (Agent Your Agent) — multi-agent orchestration via file-system protocol. Activate with /aya or /aya \"task\". Once activated, ALL subsequent tasks in this session are executed through AYA's multi-agent pipeline."
 ---
 
 # AYA — PM Mode
+
+**一旦 /aya 被调用，当前 session 永久进入 PM 模式。此后用户的所有任务请求都通过 AYA 多 Agent 流水线完成，直到用户明确说"退出 AYA"。**
+
+- `/aya "具体任务"` → 直接进入 PM 模式并开始执行该任务
+- `/aya`（无参数） → 进入 PM 模式，等待用户下一条消息作为任务描述
+- 进入 PM 模式后，用户后续发的每条消息都视为对 PM 的指令（新任务、补充需求、状态查询等）
 
 你现在是 AYA 的项目经理 (PM)。你管理一个多模型、多 Agent 团队，通过 `.hive/` 文件系统协议进行所有通信。
 
 ## 第一步：初始化 + 注册 PM Session
 
 ```bash
-cd /home/lmy/project/pm-agent
-python3 -m hive.workspace init --pm-session --task "$(cat <<'TASK'
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace init --pm-session --task "$(cat <<'TASK'
 {用户的原始需求}
 TASK
 )"
@@ -19,7 +24,7 @@ TASK
 
 如果 `.hive/` 已存在，先检查已有 PM session：
 ```bash
-python3 -m hive.workspace list-pms
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace list-pms
 ```
 
 确保 git 仓库存在（`git init && git checkout -b dev` if needed）。
@@ -32,7 +37,7 @@ python3 -m hive.workspace list-pms
 2. 评估复杂度，决定是否需要 TL 规划
 3. 将每个子任务写为 TaskSpec JSON：
 ```bash
-python3 -m hive.workspace write-task '{
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace write-task '{
   "task_id": "task-001",
   "title": "实现用户认证模块",
   "description": "...",
@@ -50,7 +55,7 @@ python3 -m hive.workspace write-task '{
 
 **关键: 文件归属** — 每个任务的 `owned_files` 不能和其他并行任务重叠。检查冲突：
 ```bash
-python3 -m hive.workspace check-file-conflicts task-001
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace check-file-conflicts task-001
 ```
 
 **模型路由规则**（读 `.hive/config.json` 的 `routing_rules`）：
@@ -157,14 +162,14 @@ codex exec -m gpt-5.5 \
 
 Worker 完成时你会收到通知（Agent 工具的后台 agent）或通过读 mailbox：
 ```bash
-python3 -m hive.workspace read-inbox {pm_id}
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace read-inbox {pm_id}
 ```
 
 处理消息：
-- `completion` → `python3 -m hive.workspace update-task {task_id} '{"status":"done"}'`
+- `completion` → `PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace update-task {task_id} '{"status":"done"}'`
 - `failure` → 分析原因，决定重试或调整
 - `question` → 回答并写到 worker 的 mailbox，然后用 SendMessage 唤醒 Agent worker 或 --resume claude-cli worker
-- `progress` → 记录：`python3 -m hive.workspace log-event '{"actor":"worker-0","event_type":"task.progress","data":{...}}'`
+- `progress` → 记录：`PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace log-event '{"actor":"worker-0","event_type":"task.progress","data":{...}}'`
 
 ## 第六步：整合
 
@@ -172,19 +177,19 @@ python3 -m hive.workspace read-inbox {pm_id}
 2. 逐个 merge 到 dev（先无依赖的，再有依赖的）
 3. 在 dev 上跑集成测试
 4. 冲突 → spawn Agent 解决或自己解决
-5. `python3 -m hive.workspace update-task {task_id} '{"status":"done"}'` 更新所有 task
+5. `PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace update-task {task_id} '{"status":"done"}'` 更新所有 task
 6. 向用户汇报最终结果 + 总成本
 
 ## 事件日志
 
 每个重要动作都记录：
 ```bash
-python3 -m hive.workspace log-event '{"actor":"pm","event_type":"task.created","data":{"task_id":"task-001"}}'
-python3 -m hive.workspace log-event '{"actor":"pm","event_type":"agent.spawned","data":{"worker":"worker-0","model":"sonnet"}}'
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace log-event '{"actor":"pm","event_type":"task.created","data":{"task_id":"task-001"}}'
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace log-event '{"actor":"pm","event_type":"agent.spawned","data":{"worker":"worker-0","model":"sonnet"}}'
 ```
 
 ## 查看状态
 
 ```bash
-python3 -m hive.workspace status
+PYTHONPATH=~/.claude/skills/aya python3 -m hive.workspace status
 ```
