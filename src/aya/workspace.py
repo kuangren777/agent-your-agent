@@ -303,6 +303,54 @@ class Workspace:
             shutil.rmtree(self.worktree_dir)
         return count
 
+    def prepare_spawn(self, task_id: str, prompt_text: str) -> Dict[str, Any]:
+        """One-step spawn preparation: create worktree, write prompt, return spawn command.
+
+        After calling this the PM just needs to paste the returned 'command' into
+        Agent() (type=='agent') or Bash(run_in_background=True) (type=='bash').
+        If worktree creation fails (e.g. not a git repo in tests), it is skipped
+        gracefully and the spawn command is still returned.
+        """
+        task = self.read_task(task_id)
+        worker_id = f"worker-{task_id}"
+        branch = f"agent/{task_id}"
+
+        # 1. Create worktree (skip if already exists or not a git repo)
+        wt_path = self.worktree_dir / worker_id
+        if not wt_path.exists():
+            try:
+                self.create_worktree(worker_id, branch)
+            except subprocess.CalledProcessError:
+                # branch may already exist — retry with -B equivalent: delete & recreate
+                try:
+                    subprocess.run(
+                        ["git", "worktree", "add", str(wt_path), "-B", branch],
+                        cwd=str(self.project_dir),
+                        capture_output=True, text=True, check=True,
+                    )
+                    self.worktree_dir.mkdir(parents=True, exist_ok=True)
+                except subprocess.CalledProcessError:
+                    pass  # not a git repo or other error; continue without worktree
+            except Exception:
+                pass  # skip worktree creation silently
+
+        # 2. Create logs directory and write prompt
+        log_dir = self.runtime_dir / "logs" / worker_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        prompt_file = log_dir / "prompt.md"
+        prompt_file.write_text(prompt_text, encoding="utf-8")
+
+        # 3. Generate and return spawn command
+        return generate_spawn_command(
+            task_id=task_id,
+            worker_id=worker_id,
+            model=task.model,
+            engine=task.engine,
+            worktree_path=str(wt_path),
+            runtime_dir=str(self.runtime_dir),
+            prompt_file=str(prompt_file),
+        )
+
     def worktree_path(self, worker_id: str) -> Path:
         return self.worktree_dir / worker_id
 
@@ -869,7 +917,7 @@ def _cli_main() -> None:
         print("          read-inbox, log-event, status, list-tasks,")
         print("          check-file-conflicts, create-worktree, remove-worktree,")
         print("          cleanup-worktrees, check-env, runtime-dir,")
-        print("          route-model, spawn-command,")
+        print("          route-model, spawn-command, spawn-worker,")
         print("          setup, models, model-env, self-update, version")
         sys.exit(1)
 
@@ -1040,6 +1088,16 @@ def _cli_main() -> None:
             runtime_dir=rt_dir,
             prompt_file=prompt_file,
         )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+
+    elif cmd == "spawn-worker":
+        if len(args) < 2:
+            print("Usage: spawn-worker TASK_ID  (prompt text read from stdin)")
+            sys.exit(1)
+        task_id = args[1]
+        prompt_text = sys.stdin.read()
+        result = ws.prepare_spawn(task_id, prompt_text)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
 
