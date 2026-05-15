@@ -191,25 +191,42 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace check-file-conflicts task-001
 
 ### Model Routing
 
-**Cost-first principle: default to the cheapest model. Only escalate when there is a specific reason the cheap model cannot handle it.** Most implementation tasks — even multi-file ones — should go to Deepseek first. Sonnet and Opus are expensive escape hatches, not defaults.
+**Balance performance and cost.** Each model has a sweet spot — use the right tool for the job, not always the cheapest or always the most expensive.
 
-| Task Characteristics | Model | Engine | Cost ($/M output) |
-|---------------------|-------|--------|-------------------|
-| **Default for all coding tasks** | deepseek-v4-pro | claude-cli | **$3.48** |
-| Standard implementation (any file count) | deepseek-v4-pro | claude-cli | $3.48 |
-| Tests, boilerplate, CRUD, docs | deepseek-v4-pro | claude-cli | $3.48 |
-| Code review, formatting | deepseek-v4-pro | claude-cli | $3.48 |
-| Simple edits, config changes | haiku | claude-agent | $5.00 |
-| Architecture decisions, complex multi-file refactor | sonnet | claude-agent | $15.00 |
-| Critical debugging (only after cheaper model failed) | sonnet | claude-agent | $15.00 |
-| Last resort: task failed on sonnet, extremely complex reasoning | opus | claude-agent | $25.00 |
+#### Model Strengths
 
-**Escalation rule:** Start with deepseek-v4-pro. If a worker fails or produces low-quality output, re-spawn with sonnet. Only use opus if sonnet also fails. Never start with opus unless the task explicitly requires multi-step architectural reasoning across 5+ files.
+| Model | SWE-bench | Cost ($/M out) | Engine | Best At |
+|-------|-----------|----------------|--------|---------|
+| Claude Opus 4.7 | 87.6% | $25.00 | claude-agent | Architecture, complex debugging, multi-file reasoning |
+| GPT-5.5 | 83.0% | $30.00 | codex | Test generation, agentic tasks, thorough coverage |
+| Deepseek-v4-pro | 80.6% | $3.48 | claude-cli | Standard implementation, CRUD, boilerplate, docs |
+| Claude Sonnet 4.6 | 79.6% | $15.00 | claude-agent | Refactoring, code review, balanced quality |
+| Claude Haiku 4.5 | ~55% | $5.00 | claude-agent | Simple edits, formatting, classification |
 
-**Cost budget awareness:** For a typical 5-task project, target total cost:
-- Deepseek-only: ~$0.15–$0.40
-- Mixed (4 deepseek + 1 sonnet): ~$0.50–$1.00
-- All sonnet: ~$2.00–$5.00 (avoid unless necessary)
+#### Routing Table
+
+| Task Type | Primary | Fallback | Rationale |
+|-----------|---------|----------|-----------|
+| Architecture / system design | opus | sonnet | Needs strongest reasoning across codebase |
+| Complex debugging (cross-module) | opus | sonnet | Root cause analysis requires deep understanding |
+| Multi-file refactoring | sonnet | deepseek | Good balance of understanding and cost |
+| Code review | sonnet | deepseek | Needs to catch subtle issues |
+| Standard implementation (CRUD, features) | deepseek | sonnet | 80.6% SWE-bench at 1/4 the cost of sonnet |
+| Test generation | gpt-5.5 | deepseek | GPT-5.5 excels at thorough test coverage |
+| Boilerplate / scaffolding | deepseek | haiku | Straightforward, cost-sensitive |
+| Documentation | deepseek | haiku | Writing-heavy, no complex reasoning needed |
+| Simple edits / config | haiku | deepseek | Fastest, cheapest for trivial changes |
+
+#### Key Principles
+- **Use all 5 models**, not just one. Each has a purpose.
+- **Deepseek is the workhorse** for standard coding — 80.6% SWE-bench at $3.48 is exceptional value.
+- **GPT-5.5 for tests** — its agentic and thoroughness strengths shine in test generation.
+- **Sonnet for quality-sensitive tasks** — review, refactoring where subtle bugs matter.
+- **Opus only for high-stakes reasoning** — architecture and hard debugging. Don't waste it on CRUD.
+- **Haiku for trivial tasks** — don't pay $3.48 to rename a variable.
+
+#### Escalation on Failure
+If a worker fails or produces poor output, re-spawn with the fallback model. Track which model was used in the event log so you can learn patterns.
 
 ---
 

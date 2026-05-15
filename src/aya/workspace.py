@@ -769,14 +769,14 @@ def _default_config() -> Dict[str, Any]:
             },
         },
         "routing_rules": [
-            {"task_type": "architecture", "prefer": "claude-sonnet", "fallback": "deepseek-v4-pro"},
-            {"task_type": "complex_refactor", "prefer": "deepseek-v4-pro", "fallback": "claude-sonnet"},
-            {"task_type": "implementation", "prefer": "deepseek-v4-pro", "fallback": "claude-haiku"},
-            {"task_type": "testing", "prefer": "deepseek-v4-pro", "fallback": "claude-haiku"},
+            {"task_type": "architecture", "prefer": "claude-opus", "fallback": "claude-sonnet"},
+            {"task_type": "complex_refactor", "prefer": "claude-sonnet", "fallback": "deepseek-v4-pro"},
+            {"task_type": "implementation", "prefer": "deepseek-v4-pro", "fallback": "claude-sonnet"},
+            {"task_type": "testing", "prefer": "gpt-5.5", "fallback": "deepseek-v4-pro"},
             {"task_type": "boilerplate", "prefer": "deepseek-v4-pro", "fallback": "claude-haiku"},
-            {"task_type": "review", "prefer": "deepseek-v4-pro", "fallback": "claude-haiku"},
+            {"task_type": "review", "prefer": "claude-sonnet", "fallback": "deepseek-v4-pro"},
             {"task_type": "documentation", "prefer": "deepseek-v4-pro", "fallback": "claude-haiku"},
-            {"task_type": "debugging", "prefer": "claude-sonnet", "fallback": "deepseek-v4-pro"},
+            {"task_type": "debugging", "prefer": "claude-opus", "fallback": "claude-sonnet"},
         ],
     }
 
