@@ -1,10 +1,15 @@
 #!/bin/bash
 # AYA pre-push hook: auto-increment patch version on every push
 #
-# Reads __init__.py, bumps 0.2.3 → 0.2.4, creates a version-bump commit
-# that gets included in the push.
+# Bumps patch version in __init__.py, commits it, then pushes the
+# extra commit. Uses AYA_VERSION_BUMPING env var to prevent recursion.
 
 set -e
+
+# Guard against recursion (this hook triggers another push)
+if [ "${AYA_VERSION_BUMPING:-0}" = "1" ]; then
+    exit 0
+fi
 
 INIT_FILE="src/aya/__init__.py"
 
@@ -25,4 +30,12 @@ sed -i "s/__version__ = \"$CURRENT\"/__version__ = \"$NEW_VERSION\"/" "$INIT_FIL
 git add "$INIT_FILE"
 git commit -m "Bump version $CURRENT → $NEW_VERSION" --no-verify
 
-echo "AYA: version $CURRENT → $NEW_VERSION"
+echo "AYA: version $CURRENT → $NEW_VERSION (will push after current push completes)"
+
+# Schedule a background push of the version bump commit after this push finishes.
+# The 1-second sleep gives the current push time to complete.
+(
+    sleep 1
+    AYA_VERSION_BUMPING=1 git push --no-verify 2>/dev/null && \
+        echo "AYA: version bump commit pushed" || true
+) &
