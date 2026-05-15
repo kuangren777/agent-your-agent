@@ -1,0 +1,28 @@
+#!/bin/bash
+# AYA pre-push hook: auto-increment patch version on every push
+#
+# Reads __init__.py, bumps 0.2.3 → 0.2.4, creates a version-bump commit
+# that gets included in the push.
+
+set -e
+
+INIT_FILE="src/aya/__init__.py"
+
+if [ ! -f "$INIT_FILE" ]; then
+    exit 0
+fi
+
+CURRENT=$(grep -oP '(?<=__version__ = ")[^"]+' "$INIT_FILE")
+if [ -z "$CURRENT" ]; then
+    exit 0
+fi
+
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+PATCH=$((PATCH + 1))
+NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+sed -i "s/__version__ = \"$CURRENT\"/__version__ = \"$NEW_VERSION\"/" "$INIT_FILE"
+git add "$INIT_FILE"
+git commit -m "Bump version $CURRENT → $NEW_VERSION" --no-verify
+
+echo "AYA: version $CURRENT → $NEW_VERSION"

@@ -41,6 +41,12 @@ cp -r "$SRC_DIR/src/aya" "$AYA_SRC/aya"
 rm -rf "$AYA_SRC/aya/__pycache__"
 echo "  ✓ Python package → $AYA_SRC/aya/"
 
+# Copy git hooks to core so self-update preserves them
+if [ -d "$SRC_DIR/githooks" ]; then
+    cp -r "$SRC_DIR/githooks" "$AYA_HOME/githooks"
+    chmod +x "$AYA_HOME/githooks/"* 2>/dev/null
+fi
+
 # --- Claude Code integration ---
 echo "[2/3] Installing Claude Code skill"
 mkdir -p "$CLAUDE_SKILL"
