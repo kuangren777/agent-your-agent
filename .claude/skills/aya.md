@@ -225,6 +225,24 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace check-file-conflicts task-001
 - **Opus only for high-stakes reasoning** — architecture and hard debugging. Don't waste it on CRUD.
 - **Haiku for trivial tasks** — don't pay $3.48 to rename a variable.
 
+#### Routing Enforcement (Mandatory)
+
+**Before spawning each worker, PM MUST run `route-model` to get the recommended model:**
+
+```bash
+PYTHONPATH=~/.aya/src python3 -m aya.workspace route-model {task_type}
+```
+
+This outputs the recommended model + engine + fallback based on the routing table. PM must use this output when writing the TaskSpec's `model` and `engine` fields.
+
+**If PM overrides the recommendation (e.g., uses sonnet when deepseek was recommended), it must state the reason in the event log:**
+
+```bash
+PYTHONPATH=~/.aya/src python3 -m aya.workspace log-event '{"actor":"pm","event_type":"routing.override","data":{"task_id":"task-001","recommended":"deepseek-v4-pro","actual":"claude-sonnet","reason":"task requires understanding complex type system"}}'
+```
+
+**After filling in model/engine on each TaskSpec, PM must verify the model distribution is diverse.** If all tasks use the same model, re-evaluate — it's almost certainly wrong.
+
 #### Escalation on Failure
 If a worker fails or produces poor output, re-spawn with the fallback model. Track which model was used in the event log so you can learn patterns.
 
@@ -342,33 +360,27 @@ Run before committing: {from plan.md Verification section}
 
 #### Spawn Commands
 
-**Claude Agent (sonnet/opus/haiku)**:
+**Step 1: Write the worker prompt to a file** (so all engines can read it):
+```bash
+mkdir -p {runtime_dir}/logs/worker-{task_id}
 ```
-Agent({
-  description: "Worker-{id}: {title}",
-  name: "worker-{task_id}",
-  model: "{model_id}",
-  mode: "bypassPermissions",
-  run_in_background: true,
-  prompt: "{Sub-agent Worker prompt}"
-})
+Then use `Write` tool to write the prompt to `{runtime_dir}/logs/worker-{task_id}/prompt.md`.
+
+**Step 2: Get the spawn command** (auto-selects engine based on task's model field):
+```bash
+PYTHONPATH=~/.aya/src python3 -m aya.workspace spawn-command {task_id}
 ```
 
-**Deepseek (claude-cli)**:
-```bash
-cd {worktree_path} && claude -p '{Worker prompt}' \
-  --model deepseek-v4-pro --output-format json \
-  --permission-mode bypassPermissions \
-  2>/dev/null > {runtime_dir}/logs/worker-{task_id}/result.json
-```
+This outputs JSON with the exact command to run. The engine is auto-detected:
+- `claude-agent` (opus/sonnet/haiku) → returns Agent tool call args
+- `claude-cli` (deepseek) → returns Bash command with `claude -p` + env vars
+- `codex` (gpt-5.5) → returns Bash command with `codex exec`
 
-**GPT-5.5 (codex)**:
-```bash
-codex exec -m gpt-5.5 --sandbox workspace-write \
-  --cd {worktree_path} \
-  --writable-dirs "{runtime_dir}/mailbox {runtime_dir}/board" \
-  -o {runtime_dir}/logs/worker-{task_id}/result.txt '{Worker prompt}'
-```
+**Step 3: Execute the spawn command:**
+- If `type` is `"agent"` → use the Agent tool with the returned args, replacing the prompt placeholder with the actual prompt content
+- If `type` is `"bash"` → use `Bash(command=..., run_in_background=true)`
+
+This ensures every model gets spawned through the correct engine automatically. No more defaulting to Agent tool for everything.
 
 ### 4.5 Mode B: Teammate (Tasks Requiring Real-Time Coordination)
 

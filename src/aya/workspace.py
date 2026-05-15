@@ -596,6 +596,82 @@ def get_model_env(model_name: str) -> Dict[str, str]:
     return env
 
 
+def route_model(task_type: str) -> Dict[str, str]:
+    """Look up the routing table and return the recommended model + engine.
+    Falls back to sonnet/claude-agent if task_type is unknown."""
+    ws = Workspace(".")
+    if ws.exists():
+        config = ws.load_config()
+        rules = config.get("routing_rules", [])
+        for rule in rules:
+            if rule.get("task_type") == task_type:
+                model_name = rule["prefer"]
+                engine = _detect_engine(model_name)
+                return {
+                    "model": model_name,
+                    "engine": engine,
+                    "fallback": rule.get("fallback", "claude-sonnet"),
+                    "task_type": task_type,
+                }
+    return {"model": "claude-sonnet", "engine": "claude-agent",
+            "fallback": "deepseek-v4-pro", "task_type": task_type}
+
+
+def generate_spawn_command(
+    task_id: str,
+    worker_id: str,
+    model: str,
+    engine: str,
+    worktree_path: str,
+    runtime_dir: str,
+    prompt_file: str,
+) -> Dict[str, Any]:
+    """Generate the spawn command for a worker based on its engine.
+
+    Returns a dict with 'engine', 'type' ('agent'|'bash'), and 'command'
+    (the full command string or Agent tool call args).
+    The PM pastes 'command' directly into the appropriate tool call.
+    """
+    if engine == "claude-agent":
+        model_alias = model.replace("claude-", "")
+        return {
+            "engine": engine,
+            "type": "agent",
+            "command": {
+                "description": f"Worker-{task_id}: see prompt",
+                "name": worker_id,
+                "model": model_alias,
+                "mode": "bypassPermissions",
+                "run_in_background": True,
+                "prompt": f"<read prompt from {prompt_file}>",
+            },
+        }
+    elif engine == "codex":
+        cmd = (
+            f"codex exec -m {model} "
+            f"--sandbox workspace-write "
+            f"--cd {worktree_path} "
+            f'--writable-dirs "{runtime_dir}/mailbox {runtime_dir}/board" '
+            f"-o {runtime_dir}/logs/{worker_id}/result.txt "
+            f'"$(cat {prompt_file})"'
+        )
+        return {"engine": engine, "type": "bash", "command": cmd}
+    else:
+        env_vars = get_model_env(model)
+        env_prefix = " ".join(f"{k}={v}" for k, v in env_vars.items())
+        if env_prefix:
+            env_prefix += " "
+        cmd = (
+            f"cd {worktree_path} && {env_prefix}"
+            f"claude -p \"$(cat {prompt_file})\" "
+            f"--model {model} "
+            f"--output-format json "
+            f"--permission-mode bypassPermissions "
+            f"2>/dev/null > {runtime_dir}/logs/{worker_id}/result.json"
+        )
+        return {"engine": engine, "type": "bash", "command": cmd}
+
+
 # ---------------------------------------------------------------------------
 # Self-update
 # ---------------------------------------------------------------------------
@@ -793,6 +869,7 @@ def _cli_main() -> None:
         print("          read-inbox, log-event, status, list-tasks,")
         print("          check-file-conflicts, create-worktree, remove-worktree,")
         print("          cleanup-worktrees, check-env, runtime-dir,")
+        print("          route-model, spawn-command,")
         print("          setup, models, model-env, self-update, version")
         sys.exit(1)
 
@@ -927,6 +1004,43 @@ def _cli_main() -> None:
         model_name = args[1]
         env = get_model_env(model_name)
         print(json.dumps(env))
+        return
+
+    elif cmd == "route-model":
+        task_type = args[1] if len(args) > 1 else ""
+        if not task_type:
+            print("Usage: route-model TASK_TYPE")
+            print("Task types: architecture, complex_refactor, implementation,")
+            print("            testing, boilerplate, review, documentation, debugging")
+            sys.exit(1)
+        result = route_model(task_type)
+        print(json.dumps(result, indent=2))
+        return
+
+    elif cmd == "spawn-command":
+        if len(args) < 2:
+            print("Usage: spawn-command TASK_ID [--prompt-file PATH]")
+            sys.exit(1)
+        task_id = args[1]
+        prompt_file = ""
+        for i, a in enumerate(args):
+            if a == "--prompt-file" and i + 1 < len(args):
+                prompt_file = args[i + 1]
+        task = ws.read_task(task_id)
+        wt_path = str(ws.worktree_path(f"worker-{task_id}"))
+        rt_dir = str(ws.runtime_dir)
+        if not prompt_file:
+            prompt_file = f"{rt_dir}/logs/worker-{task_id}/prompt.md"
+        result = generate_spawn_command(
+            task_id=task_id,
+            worker_id=f"worker-{task_id}",
+            model=task.model,
+            engine=task.engine,
+            worktree_path=wt_path,
+            runtime_dir=rt_dir,
+            prompt_file=prompt_file,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
         return
 
     elif cmd == "self-update":

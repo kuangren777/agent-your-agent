@@ -245,6 +245,65 @@ class TestCheckEnv:
         assert issues == []
 
 
+class TestRouteModel:
+    def test_known_task_type(self, ws, monkeypatch):
+        from aya.workspace import route_model
+        monkeypatch.chdir(ws.project_dir)
+        result = route_model("implementation")
+        assert result["model"] == "deepseek-v4-pro"
+        assert result["engine"] == "claude-cli"
+        assert "fallback" in result
+
+    def test_unknown_task_type_falls_back(self, ws, monkeypatch):
+        from aya.workspace import route_model
+        monkeypatch.chdir(ws.project_dir)
+        result = route_model("unknown_type")
+        assert result["model"] == "claude-sonnet"
+
+    def test_architecture_routes_to_opus(self, ws, monkeypatch):
+        from aya.workspace import route_model
+        monkeypatch.chdir(ws.project_dir)
+        result = route_model("architecture")
+        assert result["model"] == "claude-opus"
+
+    def test_testing_routes_to_gpt(self, ws, monkeypatch):
+        from aya.workspace import route_model
+        monkeypatch.chdir(ws.project_dir)
+        result = route_model("testing")
+        assert result["model"] == "gpt-5.5"
+
+
+class TestSpawnCommand:
+    def test_claude_agent_spawn(self, ws):
+        from aya.workspace import generate_spawn_command
+        result = generate_spawn_command(
+            "task-001", "worker-task-001", "claude-sonnet", "claude-agent",
+            "/tmp/wt", str(ws.runtime_dir), "/tmp/prompt.md",
+        )
+        assert result["type"] == "agent"
+        assert result["command"]["model"] == "sonnet"
+
+    def test_claude_cli_spawn(self, ws):
+        from aya.workspace import generate_spawn_command
+        result = generate_spawn_command(
+            "task-002", "worker-task-002", "deepseek-v4-pro", "claude-cli",
+            "/tmp/wt", str(ws.runtime_dir), "/tmp/prompt.md",
+        )
+        assert result["type"] == "bash"
+        assert "claude -p" in result["command"]
+        assert "deepseek-v4-pro" in result["command"]
+
+    def test_codex_spawn(self, ws):
+        from aya.workspace import generate_spawn_command
+        result = generate_spawn_command(
+            "task-003", "worker-task-003", "gpt-5.5", "codex",
+            "/tmp/wt", str(ws.runtime_dir), "/tmp/prompt.md",
+        )
+        assert result["type"] == "bash"
+        assert "codex exec" in result["command"]
+        assert "gpt-5.5" in result["command"]
+
+
 class TestStatusTable:
     def test_status_output(self, ws):
         pm = ws.register_pm("Build X")
