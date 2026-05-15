@@ -9,6 +9,11 @@
 
 set -e
 
+DEV_MODE=0
+if [ "$1" = "--dev" ] || [ "$2" = "--dev" ]; then
+    DEV_MODE=1
+fi
+
 AYA_HOME="$HOME/.aya"
 AYA_SRC="$AYA_HOME/src"
 CLAUDE_SKILL="$HOME/.claude/skills/aya"
@@ -32,14 +37,25 @@ else
     CLEANUP_SRC=1
 fi
 
+# Dev mode requires a real repo, not a temp clone
+if [ "$DEV_MODE" = "1" ] && [ "${CLEANUP_SRC:-0}" = "1" ]; then
+    echo "  ⚠ --dev requires running from the repo directory, falling back to copy mode"
+    DEV_MODE=0
+fi
+
 # --- Core install: ~/.aya/ ---
 echo "[1/3] Installing core to $AYA_HOME"
 mkdir -p "$AYA_HOME"
 rm -rf "$AYA_SRC"
 mkdir -p "$AYA_SRC"
-cp -r "$SRC_DIR/src/aya" "$AYA_SRC/aya"
-rm -rf "$AYA_SRC/aya/__pycache__"
-echo "  ✓ Python package → $AYA_SRC/aya/"
+if [ "$DEV_MODE" = "1" ]; then
+    ln -sf "$SRC_DIR/src/aya" "$AYA_SRC/aya"
+    echo "  ✓ Python package → $AYA_SRC/aya/ (symlink to $SRC_DIR/src/aya)"
+else
+    cp -r "$SRC_DIR/src/aya" "$AYA_SRC/aya"
+    rm -rf "$AYA_SRC/aya/__pycache__"
+    echo "  ✓ Python package → $AYA_SRC/aya/"
+fi
 
 # Copy git hooks to core so self-update preserves them
 if [ -d "$SRC_DIR/githooks" ]; then
@@ -50,8 +66,14 @@ fi
 # --- Claude Code integration ---
 echo "[2/3] Installing Claude Code skill"
 mkdir -p "$CLAUDE_SKILL"
-cp "$SRC_DIR/.claude/skills/aya.md" "$CLAUDE_SKILL/SKILL.md"
-echo "  ✓ Skill → $CLAUDE_SKILL/SKILL.md"
+if [ "$DEV_MODE" = "1" ]; then
+    rm -f "$CLAUDE_SKILL/SKILL.md"
+    ln -sf "$SRC_DIR/.claude/skills/aya.md" "$CLAUDE_SKILL/SKILL.md"
+    echo "  ✓ Skill → $CLAUDE_SKILL/SKILL.md (symlink to source)"
+else
+    cp "$SRC_DIR/.claude/skills/aya.md" "$CLAUDE_SKILL/SKILL.md"
+    echo "  ✓ Skill → $CLAUDE_SKILL/SKILL.md"
+fi
 
 # --- Codex integration ---
 echo "[3/4] Registering UserPromptSubmit hook"
@@ -130,6 +152,11 @@ if [ ! -f "$AYA_HOME/models.json" ]; then
 else
     echo "Models already configured ($AYA_HOME/models.json)"
     echo "To reconfigure: PYTHONPATH=~/.aya/src python3 -m aya.workspace setup"
+fi
+
+if [ "$DEV_MODE" = "1" ]; then
+    echo "  Dev mode: files are symlinked, edits take effect immediately"
+    echo "  Re-run without --dev for production install (copies)"
 fi
 
 echo ""
