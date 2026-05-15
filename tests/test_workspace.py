@@ -318,3 +318,65 @@ class TestStatusTable:
         assert "Auth" in output
         assert "opus" in output
         assert "Runtime:" in output
+
+
+class TestListModelsFull:
+    def test_returns_all_default_models(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        results = ws.list_models_full()
+        names = [m["name"] for m in results]
+        assert "claude-opus" in names
+        assert "claude-sonnet" in names
+        assert "claude-haiku" in names
+        assert "deepseek-v4-pro" in names
+        assert "gpt-5.5" in names
+
+    def test_each_model_has_required_keys(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        results = ws.list_models_full()
+        for model in results:
+            assert "name" in model
+            assert "engine" in model
+            assert "routing_priority" in model
+            assert "available" in model
+
+    def test_routing_priority_populated(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        results = ws.list_models_full()
+        opus = next(m for m in results if m["name"] == "claude-opus")
+        assert "architecture" in opus["routing_priority"]
+
+    def test_deepseek_has_implementation(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        results = ws.list_models_full()
+        deepseek = next(m for m in results if m["name"] == "deepseek-v4-pro")
+        assert "implementation" in deepseek["routing_priority"]
+
+    def test_availability_all_missing(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        monkeypatch.setattr("shutil.which", lambda x: None)
+        results = ws.list_models_full()
+        assert all(m["available"] is False for m in results)
+
+    def test_availability_all_present(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        monkeypatch.setattr("shutil.which", lambda x: f"/usr/bin/{x}")
+        results = ws.list_models_full()
+        assert all(m["available"] is True for m in results)
+
+    def test_user_models_merged(self, ws, monkeypatch, tmp_path):
+        import aya.workspace as mod
+        fake_models_file = tmp_path / "models.json"
+        monkeypatch.setattr(mod, "MODELS_FILE", fake_models_file)
+        monkeypatch.chdir(ws.project_dir)
+        mod.save_models({"my-custom-model": {"engine": "claude-agent", "model_id": "my-custom-model"}})
+        results = ws.list_models_full()
+        names = [m["name"] for m in results]
+        assert "my-custom-model" in names
+
+    def test_returns_list_of_dicts(self, ws, monkeypatch):
+        monkeypatch.chdir(ws.project_dir)
+        results = ws.list_models_full()
+        assert isinstance(results, list)
+        assert len(results) >= 5
+        assert all(isinstance(m, dict) for m in results)
