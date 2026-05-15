@@ -193,15 +193,25 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace check-file-conflicts task-001
 
 **Balance performance and cost.** Each model has a sweet spot — use the right tool for the job, not always the cheapest or always the most expensive.
 
+#### Billing Rule (Critical)
+
+| Model Family | Engine | Billing | Spawn Method |
+|---|---|---|---|
+| **Claude (opus/sonnet/haiku)** | claude-agent | Claude Code subscription (free) | **Agent tool ONLY** — never `claude -p` |
+| Deepseek, Qwen, Gemini, etc. | claude-cli | External API key | `claude -p --model <name>` via Bash |
+| GPT, o1, o3, o4 | codex | OpenAI API key | `codex exec` via Bash |
+
+**`claude -p` is billed separately from Claude Code.** Using it for Claude models wastes money. Always use the Agent tool for opus/sonnet/haiku.
+
 #### Model Strengths
 
 | Model | SWE-bench | Cost ($/M out) | Engine | Best At |
 |-------|-----------|----------------|--------|---------|
-| Claude Opus 4.7 | 87.6% | $25.00 | claude-agent | Architecture, complex debugging, multi-file reasoning |
-| GPT-5.5 | 83.0% | $30.00 | codex | Test generation, agentic tasks, thorough coverage |
-| Deepseek-v4-pro | 80.6% | $3.48 | claude-cli | Standard implementation, CRUD, boilerplate, docs |
-| Claude Sonnet 4.6 | 79.6% | $15.00 | claude-agent | Refactoring, code review, balanced quality |
-| Claude Haiku 4.5 | ~55% | $5.00 | claude-agent | Simple edits, formatting, classification |
+| Claude Opus 4.7 | 87.6% | included | claude-agent | Architecture, complex debugging, multi-file reasoning |
+| Claude Sonnet 4.6 | 79.6% | included | claude-agent | Refactoring, code review, balanced quality |
+| Claude Haiku 4.5 | ~55% | included | claude-agent | Simple edits, formatting, classification |
+| Deepseek-v4-pro | 80.6% | $3.48/M | claude-cli | Standard implementation, CRUD, boilerplate, docs |
+| GPT-5.5 | 83.0% | $30.00/M | codex | Test generation, agentic tasks, thorough coverage |
 
 #### Routing Table
 
@@ -358,29 +368,30 @@ Run before committing: {from plan.md Verification section}
 - Only commit, never merge (PM handles merges)
 ```
 
-#### Spawn Commands
+#### Spawn: One-Step `spawn-worker` Command
 
-**Step 1: Write the worker prompt to a file** (so all engines can read it):
+**PM writes the prompt and pipes it into `spawn-worker`:**
 ```bash
-mkdir -p {runtime_dir}/logs/worker-{task_id}
-```
-Then use `Write` tool to write the prompt to `{runtime_dir}/logs/worker-{task_id}/prompt.md`.
-
-**Step 2: Get the spawn command** (auto-selects engine based on task's model field):
-```bash
-PYTHONPATH=~/.aya/src python3 -m aya.workspace spawn-command {task_id}
+cat <<'PROMPT' | PYTHONPATH=~/.aya/src python3 -m aya.workspace spawn-worker {task_id}
+You are AYA Worker ...
+{full worker prompt}
+PROMPT
 ```
 
-This outputs JSON with the exact command to run. The engine is auto-detected:
-- `claude-agent` (opus/sonnet/haiku) → returns Agent tool call args
-- `claude-cli` (deepseek) → returns Bash command with `claude -p` + env vars
-- `codex` (gpt-5.5) → returns Bash command with `codex exec`
+This single command automatically:
+1. Reads the task's model + engine from the TaskSpec
+2. Creates an isolated git worktree at `.aya-worktrees/worker-{task_id}`
+3. Writes the prompt to `{runtime_dir}/logs/worker-{task_id}/prompt.md`
+4. Generates the correct spawn command for the engine
 
-**Step 3: Execute the spawn command:**
-- If `type` is `"agent"` → use the Agent tool with the returned args, replacing the prompt placeholder with the actual prompt content
-- If `type` is `"bash"` → use `Bash(command=..., run_in_background=true)`
+**Output is JSON with the exact command to execute:**
+- `type: "agent"` (Claude models) → paste the `command` dict into an `Agent()` tool call
+- `type: "bash"` (Deepseek/GPT) → paste the `command` string into `Bash(command=..., run_in_background=true)`
 
-This ensures every model gets spawned through the correct engine automatically. No more defaulting to Agent tool for everything.
+**This enforces correct engine selection automatically:**
+- opus/sonnet/haiku → always Agent tool (Claude Code subscription, no extra cost)
+- deepseek/qwen → always `claude -p` via Bash (external API billing)
+- gpt-5.5 → always `codex exec` via Bash (OpenAI billing)
 
 ### 4.5 Mode B: Teammate (Tasks Requiring Real-Time Coordination)
 
