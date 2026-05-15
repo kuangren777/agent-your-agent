@@ -203,22 +203,68 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace check-file-conflicts task-001
 
 ---
 
-## 第四步：Spawn Workers — 最大化并行，保证文件安全
+## 第四步：Spawn Workers — 选模式、最大化并行、保证安全
 
-### Spawn 前检查清单
+### 4.1 选择通信模式：Sub-agent vs Teammate
+
+每组并行 task，PM 必须先判断用哪种模式。**默认 Sub-agent**，只在需要时升级到 Teammate。
+
+#### 判断规则
+
+```
+并行的 task A 和 task B 之间：
+  ├── 文件完全不重叠，接口无交集 → Sub-agent（独立模式）
+  ├── 共享 read_files 但各自输出独立 → Sub-agent + Board 广播
+  ├── 一方定义接口/类型，另一方消费 → Teammate（需协商）
+  ├── 共同定义一个 API/schema/protocol → Teammate（必须）
+  └── 有运行时依赖（A 的输出是 B 的输入） → 串行（depends_on），不并行
+```
+
+#### 模式对比
+
+| | Sub-agent + Board | Teammate |
+|---|---|---|
+| **通信** | 单向：worker→PM mailbox + board 只读广播 | 双向：SendMessage 实时互发 |
+| **协调方式** | PM 在 spawn 时把接口写死在 prompt 和 board 里 | Worker 之间实时协商接口 |
+| **成本** | 低（一次性 agent，完成即释放） | 高（持久 session，需 TeamCreate/TeamDelete） |
+| **适用** | 独立模块、文档、测试、无接口共享 | 共享类型定义、API 协商、紧耦合模块 |
+
+#### 实例任务对照
+
+**用 Sub-agent 的场景：**
+- "给项目加 README + LICENSE + CI 配置" → 三个文件完全独立
+- "实现用户模块 + 实现商品模块 + 写 E2E 测试" → 三人各写各的目录
+- "前端加 3 个页面（登录/注册/设置）" → 各页面独立，共享组件由 PM 在 board 里写死
+- "后端加 4 个 CRUD endpoint" → 路由互不冲突，model 层已存在
+
+**用 Teammate 的场景：**
+- "实现 auth 中间件 + 实现需要 auth 的 API" → API worker 需要知道 auth 中间件的函数签名，可能需要协商 token 格式
+- "定义 protobuf schema + 实现 server + 实现 client" → 三人必须就 schema 达成一致
+- "重构数据层 + 更新所有调用方" → 数据层 worker 改了接口，调用方 worker 必须同步更新
+- "实现 WebSocket server + 实现 WebSocket client" → 双方要协商消息格式
+
+**混合场景（同一项目内两种模式并存）：**
+- "Build REST API with auth + CRUD + tests + docs"
+  - auth + CRUD → **Teammate**（CRUD 依赖 auth 中间件的接口）
+  - tests → **Sub-agent**（等 auth+CRUD 完成后独立写）
+  - docs → **Sub-agent**（读代码写文档，完全独立）
+
+### 4.2 Spawn 前检查清单
 
 对每个待 spawn 的 task：
 1. ✅ `depends_on` 中的所有 task 状态为 `done`
 2. ✅ `check-file-conflicts` 返回 "No file conflicts"
 3. ✅ 有交集 → 标记为 blocked，等冲突 worker 完成后再 spawn
 
-### 创建 Worker worktree
+### 4.3 创建 Worker worktree
 
 ```bash
 PYTHONPATH=~/.aya/src python3 -m aya.workspace create-worktree worker-{task_id} agent/{task_id}
 ```
 
-### Worker Prompt 模板
+### 4.4 模式 A：Sub-agent + Board（独立任务）
+
+#### Worker Prompt 模板
 
 ```
 你是 AYA Worker（{worker_id}），隶属 PM session {pm_id}。
@@ -231,9 +277,17 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace create-worktree worker-{task_id} 
 读取你的任务: cat {runtime_dir}/tasks/{task_id}.json
 
 ## 开始前必读
-1. {runtime_dir}/board/ 下所有文件（需求文档、架构设计、Plan）
+1. {runtime_dir}/board/ 下所有文件（需求文档、架构设计、Plan、接口定义）
 2. {runtime_dir}/mailbox/{pm_id}--{worker_id}/ 下的消息
 3. 任务 JSON 中 read_files 列出的所有文件（在 {worktree_path} 中读取）
+
+## 并行 Workers（信息共享）
+以下 worker 正在同时工作，你们文件不重叠但可能有逻辑关联：
+{列出所有同波次 worker 的 ID、title、owned_files}
+
+PM 已将共享的接口约定写在 board/ 下。如果你做了影响其他模块的接口决策
+（如新增公共类型、修改函数签名），写到 {runtime_dir}/board/interface-{task_id}.md
+以便后续 worker 参考。
 
 ## 可复用代码
 {从 plan.md 中提取的、与本 task 相关的可复用函数列表，带 file:line}
@@ -244,28 +298,26 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace create-worktree worker-{task_id} 
 ## 完成后的验证
 在提交前运行：{从 plan.md 的 Verification 部分提取}
 
-## 文件系统通信
-- 进度报告 → 写到 {runtime_dir}/mailbox/{pm_id}/
-  文件名: {YYYYMMDD}-{HHMMSS}-{worker_id}-progress.json
-  内容: {"id":"msg-xxx","ts":"...","from_agent":"{worker_id}","to_agent":"{pm_id}","msg_type":"progress","subject":"...","data":{"task_id":"...","percent":50,"summary":"..."}}
-
+## 文件系统通信（worker→PM 单向）
 - 完成报告 → 写到 {runtime_dir}/mailbox/{pm_id}/
   文件名: {YYYYMMDD}-{HHMMSS}-{worker_id}-completion.json
-  内容: {"id":"msg-xxx","ts":"...","from_agent":"{worker_id}","to_agent":"{pm_id}","msg_type":"completion","subject":"task done","data":{"task_id":"...","status":"done","branch":"agent/{task_id}","files_changed":[...],"test_result":"pass|fail","summary":"一句话总结改了什么"}}
-
-- 遇到阻塞问题 → 写 question 消息到 {runtime_dir}/mailbox/{pm_id}/ 并停下等待
+  内容: {"id":"msg-xxx","ts":"...","from_agent":"{worker_id}","to_agent":"{pm_id}",
+         "msg_type":"completion","subject":"task done",
+         "data":{"task_id":"...","status":"done","branch":"agent/{task_id}",
+                 "files_changed":[...],"test_result":"pass|fail",
+                 "summary":"一句话总结","interfaces_defined":["board/interface-{task_id}.md"]}}
+- 遇到阻塞 → 写 question 消息到 mailbox/{pm_id}/ 并停下等待
 
 ## 工作约束
 - 只在 {worktree_path} 目录下修改文件
 - 只修改 owned_files 中声明的文件
 - commit message 以 [aya:{task_id}] 开头
 - 只 commit，不 merge（merge 由 PM 做）
-- 完成前确保验收标准全部通过
 ```
 
-### Spawn 方式
+#### Spawn 命令
 
-**Claude Agent (sonnet/opus/haiku)** — 不使用 `isolation: "worktree"`（AYA 自己管 worktree）：
+**Claude Agent (sonnet/opus/haiku)**：
 ```
 Agent({
   description: "Worker-{id}: {title}",
@@ -273,40 +325,124 @@ Agent({
   model: "{model_id}",
   mode: "bypassPermissions",
   run_in_background: true,
-  prompt: "{Worker prompt，填入所有绝对路径和具体内容}"
+  prompt: "{Sub-agent Worker prompt}"
 })
 ```
 
-**Deepseek** — engine: claude-cli:
+**Deepseek (claude-cli)**：
 ```bash
-cd {worktree_path} && \
-claude -p '{Worker prompt}' \
-  --model deepseek-v4-pro \
-  --output-format json \
+cd {worktree_path} && claude -p '{Worker prompt}' \
+  --model deepseek-v4-pro --output-format json \
   --permission-mode bypassPermissions \
   2>/dev/null > {runtime_dir}/logs/worker-{task_id}/result.json
 ```
-用 `Bash(run_in_background=true)` 并行。
 
-**GPT-5.5** — engine: codex:
+**GPT-5.5 (codex)**：
 ```bash
-codex exec -m gpt-5.5 \
-  --sandbox workspace-write \
+codex exec -m gpt-5.5 --sandbox workspace-write \
   --cd {worktree_path} \
   --writable-dirs "{runtime_dir}/mailbox {runtime_dir}/board" \
-  -o {runtime_dir}/logs/worker-{task_id}/result.txt \
-  '{Worker prompt}'
+  -o {runtime_dir}/logs/worker-{task_id}/result.txt '{Worker prompt}'
 ```
 
-### 并行调度策略
+### 4.5 模式 B：Teammate（需要实时协调的任务）
 
-1. 扫描所有 pending tasks，找出 `depends_on` 全部 done 且无文件冲突的
-2. 同一轮 spawn 的所有 worker 放在**一条消息**中并行启动
-3. 等待任一 worker 完成后，重新扫描，spawn 下一批 unblocked tasks
-4. 记录事件日志：
+当 2+ 个 task 需要运行时协商接口时，用 Claude Code 的 Team 模式。
+
+#### 步骤 1：创建 Team
+
+```
+TeamCreate({
+  team_name: "aya-{pm_id}",
+  description: "AYA worker team for {项目描述}"
+})
+```
+
+#### 步骤 2：Spawn Teammates
+
+每个需要协调的 worker 作为 teammate 加入 team：
+
+```
+Agent({
+  description: "Teammate-{id}: {title}",
+  name: "{worker_name}",
+  team_name: "aya-{pm_id}",
+  model: "{model_id}",
+  mode: "bypassPermissions",
+  prompt: "{Teammate Worker prompt}"
+})
+```
+
+#### Teammate Worker Prompt 模板
+
+```
+你是 AYA Teammate（{worker_name}），属于 team "aya-{pm_id}"。
+
+## 工作目录
+{worktree_path}
+
+## 任务
+{task description，含具体要求和验收标准}
+
+## 你的队友
+{列出同 team 所有 teammate 的 name 和 task 概述}
+
+## 通信规则（关键！）
+- 你的文字输出对队友不可见。要和队友沟通**必须用 SendMessage 工具**。
+- SendMessage(to: "{teammate_name}", message: "...") → 发给特定队友
+- SendMessage(to: "*", message: "...") → 广播给所有队友（慎用）
+- SendMessage(to: "team-lead", message: "...") → 发给 PM
+
+## 什么时候必须通信
+1. 你定义了一个其他 teammate 要用的接口（函数签名、类型、API schema）→ 立刻 SendMessage 告知
+2. 你发现需要修改 plan 中约定的接口 → SendMessage 协商，达成一致后再改
+3. 你遇到阻塞（依赖 teammate 的输出）→ SendMessage 询问进度
+4. 你完成了 → SendMessage(to: "team-lead", message: "task-{id} done, branch agent/{task_id}")
+
+## 什么时候不要通信
+- 不要发状态更新（"我开始了""进度 50%"），直接干活
+- 不要广播（to: "*"）常规信息，只在需要所有人知道时用
+- 不要发 JSON 协议消息，用自然语言
+
+## 工作约束
+- 只在 {worktree_path} 目录下修改文件
+- 只修改 owned_files 中声明的文件
+- commit message 以 [aya:{task_id}] 开头
+- 只 commit，不 merge
+```
+
+#### 步骤 3：PM 监听 Team 消息
+
+PM 自动收到所有 teammate 发给 "team-lead" 的消息。当所有 teammate 报告完成时，清理 team：
+
+```
+TeamDelete({
+  team_name: "aya-{pm_id}"
+})
+```
+
+### 4.6 混合调度策略
+
+一个项目内可以同时有 Sub-agent 和 Teammate worker：
+
+```
+Wave 1（并行）:
+  ├── Teammate group: auth-worker + api-worker (team "aya-pm-xxx")
+  │     → 需要协商 auth 中间件接口
+  └── Sub-agent: docs-worker (独立)
+        → 读代码写文档，不需要协调
+
+Wave 2（Wave 1 完成后）:
+  └── Sub-agent: test-worker (depends_on: auth + api)
+        → 基于已完成的代码写测试
+```
+
+PM 在同一条消息中并行发出 TeamCreate + Agent(teammate) + Agent(sub-agent)。
+
+### 4.7 事件日志
 
 ```bash
-PYTHONPATH=~/.aya/src python3 -m aya.workspace log-event '{"actor":"pm","event_type":"worker.spawned","data":{"task_id":"task-001","worker_id":"worker-task-001","model":"sonnet"}}'
+PYTHONPATH=~/.aya/src python3 -m aya.workspace log-event '{"actor":"pm","event_type":"worker.spawned","data":{"task_id":"task-001","worker_id":"worker-task-001","model":"sonnet","mode":"sub-agent"}}'
 ```
 
 ---
