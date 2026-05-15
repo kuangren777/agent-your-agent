@@ -109,7 +109,8 @@ class Message:
     @property
     def filename(self) -> str:
         ts_safe = self.ts.replace(":", "").replace("-", "")[:15]
-        return f"{ts_safe}-{self.from_agent}-{self.msg_type}.json"
+        id_suffix = self.id.replace("msg-", "")[:6]
+        return f"{ts_safe}-{self.from_agent}-{self.msg_type}-{id_suffix}.json"
 
 
 def create_message(

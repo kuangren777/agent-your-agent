@@ -377,10 +377,10 @@ class TestCommunicationEdgeCases:
             subject="Done",
         )
         filename = msg.filename
-        # Expected pattern: {ts_safe}-{from_agent}-{msg_type}.json
+        # Expected pattern: {ts_safe}-{from_agent}-{msg_type}-{id_suffix}.json
         assert filename.endswith(".json")
         assert "-worker-abc-" in filename
-        assert filename.endswith("-completion.json")
+        assert "-completion-" in filename
         # ts_safe portion: no colons or dashes from iso timestamp, max 15 chars before first dash
         parts = filename.split("-worker-abc-")
         assert len(parts) == 2

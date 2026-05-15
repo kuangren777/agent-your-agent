@@ -66,7 +66,14 @@ class TestMessage:
     def test_filename(self):
         m = create_message("worker-0", "pm", "completion", "Done")
         fn = m.filename
-        assert fn.endswith("-worker-0-completion.json")
+        id_suffix = m.id.replace("msg-", "")[:6]
+        assert fn.endswith(f"-worker-0-completion-{id_suffix}.json")
+
+    def test_filename_uniqueness(self):
+        """Two messages same second/agent/type get different filenames."""
+        m1 = create_message("worker-0", "pm", "completion", "Done")
+        m2 = create_message("worker-0", "pm", "completion", "Done")
+        assert m1.filename != m2.filename
 
     def test_roundtrip(self):
         m = create_message("pm", "tl-0", "assign", "Task", body="Do this", data={"x": 1})
