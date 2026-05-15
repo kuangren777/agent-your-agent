@@ -48,7 +48,45 @@ cp "$SRC_DIR/.claude/skills/aya.md" "$CLAUDE_SKILL/SKILL.md"
 echo "  ✓ Skill → $CLAUDE_SKILL/SKILL.md"
 
 # --- Codex integration ---
-echo "[3/3] Installing Codex instructions"
+echo "[3/4] Registering UserPromptSubmit hook"
+CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+AYA_HOOK_CMD="PYTHONPATH=~/.aya/src python3 -m aya.hooks"
+if [ -f "$CLAUDE_SETTINGS" ]; then
+    # Check if hook already registered
+    if ! grep -q "aya.hooks" "$CLAUDE_SETTINGS" 2>/dev/null; then
+        # Use python to safely merge hook into existing settings
+        python3 -c "
+import json, sys
+with open('$CLAUDE_SETTINGS') as f:
+    s = json.load(f)
+hooks = s.setdefault('hooks', {})
+ups = hooks.setdefault('UserPromptSubmit', [])
+already = any('aya.hooks' in str(h) for h in ups)
+if not already:
+    ups.append({'hooks': [{'type': 'command', 'command': '$AYA_HOOK_CMD', 'timeout': 3}]})
+    with open('$CLAUDE_SETTINGS', 'w') as f:
+        json.dump(s, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+    print('  ✓ Hook registered in $CLAUDE_SETTINGS')
+else:
+    print('  ⊘ Hook already registered')
+" 2>/dev/null || echo "  ⊘ Could not update $CLAUDE_SETTINGS (update manually)"
+    else
+        echo "  ⊘ Hook already registered"
+    fi
+else
+    # Create minimal settings with hook
+    python3 -c "
+import json
+s = {'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': '$AYA_HOOK_CMD', 'timeout': 3}]}]}}
+with open('$CLAUDE_SETTINGS', 'w') as f:
+    json.dump(s, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+print('  ✓ Created $CLAUDE_SETTINGS with hook')
+" 2>/dev/null || echo "  ⊘ Could not create $CLAUDE_SETTINGS (create manually)"
+fi
+
+echo "[4/4] Installing Codex instructions"
 CODEX_DIR="$HOME/.codex"
 mkdir -p "$CODEX_DIR"
 if [ ! -f "$CODEX_DIR/instructions.md" ]; then
