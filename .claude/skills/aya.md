@@ -191,15 +191,25 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace check-file-conflicts task-001
 
 ### Model Routing
 
-Cost-first: use the cheapest model that can handle the task.
+**Cost-first principle: default to the cheapest model. Only escalate when there is a specific reason the cheap model cannot handle it.** Most implementation tasks — even multi-file ones — should go to Deepseek first. Sonnet and Opus are expensive escape hatches, not defaults.
 
-| Task Characteristics | Model | Engine | Rationale |
-|---------------------|-------|--------|-----------|
-| ≤2 files + pure coding/tests | deepseek-v4-pro | claude-cli | $3.48/M, best cost-performance |
-| 3-5 files standard implementation | sonnet | claude-agent | $15/M, balanced capability and cost |
-| >5 files / architectural decisions / complex debugging | opus | claude-agent | $25/M, strongest reasoning |
-| Simple docs/formatting | haiku | claude-agent | $5/M, fastest and cheapest |
-| Test generation (heavy boilerplate) | deepseek-v4-pro | claude-cli | $3.48/M |
+| Task Characteristics | Model | Engine | Cost ($/M output) |
+|---------------------|-------|--------|-------------------|
+| **Default for all coding tasks** | deepseek-v4-pro | claude-cli | **$3.48** |
+| Standard implementation (any file count) | deepseek-v4-pro | claude-cli | $3.48 |
+| Tests, boilerplate, CRUD, docs | deepseek-v4-pro | claude-cli | $3.48 |
+| Code review, formatting | deepseek-v4-pro | claude-cli | $3.48 |
+| Simple edits, config changes | haiku | claude-agent | $5.00 |
+| Architecture decisions, complex multi-file refactor | sonnet | claude-agent | $15.00 |
+| Critical debugging (only after cheaper model failed) | sonnet | claude-agent | $15.00 |
+| Last resort: task failed on sonnet, extremely complex reasoning | opus | claude-agent | $25.00 |
+
+**Escalation rule:** Start with deepseek-v4-pro. If a worker fails or produces low-quality output, re-spawn with sonnet. Only use opus if sonnet also fails. Never start with opus unless the task explicitly requires multi-step architectural reasoning across 5+ files.
+
+**Cost budget awareness:** For a typical 5-task project, target total cost:
+- Deepseek-only: ~$0.15–$0.40
+- Mixed (4 deepseek + 1 sonnet): ~$0.50–$1.00
+- All sonnet: ~$2.00–$5.00 (avoid unless necessary)
 
 ---
 

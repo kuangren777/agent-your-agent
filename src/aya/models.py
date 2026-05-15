@@ -32,8 +32,8 @@ class TaskSpec:
     owned_files: List[str] = field(default_factory=list)
     read_files: List[str] = field(default_factory=list)
     acceptance_criteria: List[str] = field(default_factory=list)
-    engine: str = "claude-agent"
-    model: str = "sonnet"
+    engine: str = "claude-cli"
+    model: str = "deepseek-v4-pro"
     created_at: str = ""
     updated_at: str = ""
     result: Optional[str] = None
@@ -58,8 +58,8 @@ def create_task(
     owned_files: Optional[List[str]] = None,
     read_files: Optional[List[str]] = None,
     acceptance_criteria: Optional[List[str]] = None,
-    engine: str = "claude-agent",
-    model: str = "sonnet",
+    engine: str = "claude-cli",
+    model: str = "deepseek-v4-pro",
 ) -> TaskSpec:
     tid = f"task-{_short_id()}"
     now = _now_iso()
