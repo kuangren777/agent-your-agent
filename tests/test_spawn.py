@@ -170,8 +170,8 @@ class TestGenerateSpawnCommandWithEnvVars:
             model="my-model", engine="claude-cli", **_COMMON
         )
         cmd = result["command"]
-        assert "OPENAI_BASE_URL=https://api.example.com" in cmd
-        assert "OPENAI_API_KEY=sk-test123" in cmd
+        assert 'ANTHROPIC_BASE_URL="https://api.example.com"' in cmd
+        assert 'ANTHROPIC_AUTH_TOKEN="sk-test123"' in cmd
 
     def test_cli_only_base_url(self, models_file):
         self._save_model(models_file, base_url="https://api.example.com")
@@ -179,8 +179,8 @@ class TestGenerateSpawnCommandWithEnvVars:
             model="my-model", engine="claude-cli", **_COMMON
         )
         cmd = result["command"]
-        assert "OPENAI_BASE_URL=https://api.example.com" in cmd
-        assert "OPENAI_API_KEY" not in cmd
+        assert 'ANTHROPIC_BASE_URL="https://api.example.com"' in cmd
+        assert "ANTHROPIC_AUTH_TOKEN" not in cmd
 
     def test_agent_ignores_env_vars(self, models_file):
         self._save_model(models_file, base_url="https://api.example.com", api_key="sk-test123")
@@ -190,8 +190,8 @@ class TestGenerateSpawnCommandWithEnvVars:
         # Agent commands return a dict, not a string — no env vars injected
         assert isinstance(result["command"], dict)
         cmd_str = json.dumps(result["command"])
-        assert "OPENAI_BASE_URL" not in cmd_str
-        assert "OPENAI_API_KEY" not in cmd_str
+        assert "ANTHROPIC_BASE_URL" not in cmd_str
+        assert "ANTHROPIC_AUTH_TOKEN" not in cmd_str
 
 
 # ---------------------------------------------------------------------------
@@ -203,13 +203,13 @@ class TestGetModelEnv:
     def test_model_with_both_vars(self, models_file):
         save_models({"m1": {"base_url": "https://api.example.com", "api_key": "sk-abc"}})
         env = get_model_env("m1")
-        assert env == {"OPENAI_BASE_URL": "https://api.example.com", "OPENAI_API_KEY": "sk-abc"}
+        assert env == {"ANTHROPIC_BASE_URL": "https://api.example.com", "ANTHROPIC_AUTH_TOKEN": "sk-abc"}
 
     def test_model_with_only_base_url(self, models_file):
         save_models({"m2": {"base_url": "https://api.example.com"}})
         env = get_model_env("m2")
-        assert env == {"OPENAI_BASE_URL": "https://api.example.com"}
-        assert "OPENAI_API_KEY" not in env
+        assert env == {"ANTHROPIC_BASE_URL": "https://api.example.com"}
+        assert "ANTHROPIC_AUTH_TOKEN" not in env
 
     def test_model_not_found(self, models_file):
         save_models({"other": {"base_url": "https://x.com"}})

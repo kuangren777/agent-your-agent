@@ -665,15 +665,27 @@ def list_models() -> None:
 
 def get_model_env(model_name: str) -> Dict[str, str]:
     """Return environment variables needed to use a model via claude -p.
-    PM passes these when spawning a claude-cli worker."""
+    PM passes these when spawning a claude-cli worker.
+    Uses ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN for claude -p compatibility."""
     models = load_models()
     cfg = models.get(model_name, {})
     env = {}
     if cfg.get("base_url"):
-        env["OPENAI_BASE_URL"] = cfg["base_url"]
+        env["ANTHROPIC_BASE_URL"] = cfg["base_url"]
     if cfg.get("api_key"):
-        env["OPENAI_API_KEY"] = cfg["api_key"]
+        env["ANTHROPIC_AUTH_TOKEN"] = cfg["api_key"]
     return env
+
+
+def get_model_id_with_context(model_name: str) -> str:
+    """Return the model ID with context window suffix if configured.
+    e.g., 'deepseek-v4-pro' → 'deepseek-v4-pro[1m]' if models.json has it."""
+    models = load_models()
+    cfg = models.get(model_name, {})
+    model_id = cfg.get("model_id", model_name)
+    if model_id == model_name and cfg.get("base_url"):
+        return f"{model_name}[1m]"
+    return model_id
 
 
 def route_model(task_type: str) -> Dict[str, str]:
@@ -738,13 +750,14 @@ def generate_spawn_command(
         return {"engine": engine, "type": "bash", "command": cmd}
     else:
         env_vars = get_model_env(model)
-        env_prefix = " ".join(f"{k}={v}" for k, v in env_vars.items())
+        env_prefix = " ".join(f'{k}="{v}"' for k, v in env_vars.items())
         if env_prefix:
             env_prefix += " "
+        model_id = get_model_id_with_context(model)
         cmd = (
             f"cd {worktree_path} && {env_prefix}"
             f"claude -p \"$(cat {prompt_file})\" "
-            f"--model {model} "
+            f"--model {model_id} "
             f"--output-format json "
             f"--permission-mode bypassPermissions "
             f"2>/dev/null > {runtime_dir}/logs/{worker_id}/result.json"
