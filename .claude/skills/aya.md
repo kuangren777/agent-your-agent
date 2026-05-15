@@ -503,10 +503,33 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace read-inbox {pm_id}
 ```
 
 Handle messages:
-- `completion` + status=done → `update-task {task_id} '{"status":"done","result":"..."}'` → `remove-worktree worker-{task_id}` → check if blocked tasks can be unblocked
+- `completion` + status=done → update task + track cost (see below) + `remove-worktree worker-{task_id}` → check if blocked tasks can be unblocked
 - `completion` + status=fail → analyze cause, decide: (a) retry with stronger model (b) adjust task description and re-spawn (c) report to user
 - `question` → if PM can answer, write reply to worker's mailbox; if user input needed, use `AskUserQuestion` to ask the user then relay
 - `progress` → update internal state, continue waiting
+
+### Cost Tracking
+
+When a worker completes, PM must extract cost from the result and update the task + project state.
+
+**For Agent tool workers (claude-agent):** The Agent tool completion notification includes `usage` with `total_tokens` and `duration_ms`. Extract and calculate:
+```
+cost = output_tokens * cost_per_mtok / 1_000_000
+```
+Claude models are included in the subscription, so record token count for tracking but cost = $0.
+
+**For Bash workers (claude-cli / codex):** Read the result JSON file:
+```bash
+cat {runtime_dir}/logs/worker-{task_id}/result.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('total_cost_usd', 0))"
+```
+
+**Update the task and project state:**
+```bash
+PYTHONPATH=~/.aya/src python3 -m aya.workspace update-task {task_id} '{"status":"done","result":"summary here"}'
+PYTHONPATH=~/.aya/src python3 -m aya.workspace log-event '{"actor":"pm","event_type":"worker.completed","data":{"task_id":"{task_id}","model":"{model}","cost_usd":{cost},"tokens":{tokens}}}'
+```
+
+**In the final report (Step 7),** sum all worker costs and include a breakdown by model.
 
 ---
 
