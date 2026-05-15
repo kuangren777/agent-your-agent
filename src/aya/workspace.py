@@ -10,6 +10,7 @@ Layout:
 Usage as CLI:
     python3 -m aya.workspace init [--pm-session] [--name NAME] [--task TASK]
     python3 -m aya.workspace list-pms
+    python3 -m aya.workspace list-models
     python3 -m aya.workspace write-task JSON
     python3 -m aya.workspace update-task TASK_ID JSON
     python3 -m aya.workspace send-msg JSON
@@ -397,6 +398,37 @@ class Workspace:
                 "fix": "Install git",
             })
         return issues
+
+    def list_models_full(self) -> List[Dict[str, Any]]:
+        """List all models with engine, routing priority, and availability."""
+        config = self.load_config()
+        config_models = config.get("models", {})
+        user_models = load_models()
+
+        all_models = {**config_models, **user_models}
+
+        routing_map: Dict[str, List[str]] = {}
+        for rule in config.get("routing_rules", []):
+            preferred = rule.get("prefer", "")
+            tt = rule.get("task_type", "")
+            if preferred and tt:
+                routing_map.setdefault(preferred, []).append(tt)
+
+        engine_binaries = {"claude-agent": "claude", "claude-cli": "claude", "codex": "codex"}
+
+        result = []
+        for name, cfg in sorted(all_models.items()):
+            engine = cfg.get("engine", _detect_engine(name))
+            binary = engine_binaries.get(engine, "claude")
+            result.append({
+                "name": name,
+                "engine": engine,
+                "routing_priority": routing_map.get(name, []),
+                "available": shutil.which(binary) is not None,
+                "model_id": cfg.get("model_id", name),
+                "status": cfg.get("status", "configured"),
+            })
+        return result
 
     # ------------------------------------------------------------------
     # Status display
@@ -913,7 +945,7 @@ def _cli_main() -> None:
     args = sys.argv[1:]
     if not args:
         print("Usage: python3 -m aya.workspace <command> [args]")
-        print("Commands: init, list-pms, write-task, update-task, send-msg,")
+        print("Commands: init, list-pms, list-models, write-task, update-task, send-msg,")
         print("          read-inbox, log-event, status, list-tasks,")
         print("          check-file-conflicts, create-worktree, remove-worktree,")
         print("          cleanup-worktrees, check-env, runtime-dir,")
@@ -924,7 +956,17 @@ def _cli_main() -> None:
     cmd = args[0]
     ws = Workspace(".")
 
-    if cmd == "init":
+    if cmd == "list-models":
+        models = ws.list_models_full()
+        print(f"{'Name':25s} {'Engine':15s} {'Available':10s} Routing Priority")
+        print("-" * 80)
+        for m in models:
+            avail = "yes" if m["available"] else "NO"
+            priority = ", ".join(m["routing_priority"]) or "-"
+            print(f"{m['name']:25s} {m['engine']:15s} {avail:10s} {priority}")
+        return
+
+    elif cmd == "init":
         pm_session = "--pm-session" in args
         name = None
         for i, a in enumerate(args):
