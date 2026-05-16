@@ -123,6 +123,7 @@ class Workspace:
         pm = create_pm_session(task)
         self._write_json(self.runtime_dir / "pms" / f"{pm.id}.json", pm.to_dict())
         (self.runtime_dir / "mailbox" / pm.id).mkdir(parents=True, exist_ok=True)
+        (self.runtime_dir / "board" / pm.id).mkdir(parents=True, exist_ok=True)
 
         state = self.load_state()
         state.pm_sessions.append(pm.id)

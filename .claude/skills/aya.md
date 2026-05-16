@@ -92,7 +92,7 @@ The Plan phase cycles through three sub-phases until the approach is mature:
 
 Goal: Quickly build understanding of the relevant code. **Read-only, do not modify any files.**
 
-1. Write user requirements to `{runtime_dir}/board/requirements.md`
+1. Write user requirements to `{runtime_dir}/board/{pm_id}/requirements.md`
 2. Launch 1–3 Explore agents **in parallel** (multiple Agent calls in one message):
 
 ```
@@ -126,7 +126,7 @@ Agent({
 
 ### Phase C: Write Plan File + User Alignment
 
-Write the approach to `{runtime_dir}/board/plan.md` with this structure:
+Write the approach to `{runtime_dir}/board/{pm_id}/plan.md` with this structure:
 
 ```markdown
 # Plan: {task title}
@@ -349,7 +349,7 @@ Communication directory: {runtime_dir} ← Read tasks and write mailbox messages
 Read your task: cat {runtime_dir}/tasks/{task_id}.json
 
 ## Required Reading Before Starting
-1. All files under {runtime_dir}/board/ (requirements, architecture, plan, interface definitions)
+1. All files under {runtime_dir}/board/{pm_id}/ (requirements, architecture, plan, interface definitions)
 2. Messages in {runtime_dir}/mailbox/{pm_id}--{worker_id}/
 3. All files listed in read_files in the task JSON (read from {worktree_path})
 
@@ -357,7 +357,7 @@ Read your task: cat {runtime_dir}/tasks/{task_id}.json
 The following workers are running simultaneously. Your files don't overlap but may have logical relationships:
 {list all same-wave workers with their ID, title, owned_files}
 
-PM has written shared interface conventions in board/. If you make interface decisions that affect other modules (e.g., new public types, changed function signatures), write them to {runtime_dir}/board/interface-{task_id}.md for subsequent workers to reference.
+PM has written shared interface conventions in board/{pm_id}/. If you make interface decisions that affect other modules (e.g., new public types, changed function signatures), write them to {runtime_dir}/board/{pm_id}/interface-{task_id}.md for subsequent workers to reference.
 
 ## Reusable Code
 {reusable functions from plan.md relevant to this task, with file:line}
