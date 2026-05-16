@@ -47,6 +47,23 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace check-env
 
 If any engine is not ready, tell the user what's missing and how to install it. The user can skip engines (AYA will fallback to available models).
 
+## Step 0.5: Load Project Memory
+
+After environment check but before planning, PM reads project memory to inform routing decisions:
+
+```bash
+# Check if project has routing history
+PYTHONPATH=~/.aya/src python3 -m aya.workspace memory-stats
+
+# View project-specific patterns (architecture conventions, coding standards)
+PYTHONPATH=~/.aya/src python3 -m aya.workspace memory-patterns
+
+# Get adaptive model suggestion (uses history if available, falls back to static table)
+PYTHONPATH=~/.aya/src python3 -m aya.workspace memory-suggest implementation
+```
+
+If memory-stats shows data, use `memory-suggest` instead of `route-model` for task routing — it incorporates historical success rates for this specific project.
+
 ## Step 1: Initialize + Register PM Session
 
 ```bash
@@ -531,6 +548,20 @@ PYTHONPATH=~/.aya/src python3 -m aya.workspace log-event '{"actor":"pm","event_t
 
 **In the final report (Step 7),** sum all worker costs and include a breakdown by model.
 
+### Memory Logging
+
+After each worker completes (success or failure), log the routing result to project memory:
+
+```bash
+# On success:
+PYTHONPATH=~/.aya/src python3 -m aya.workspace memory-log {task_id} '{"task_type":"{type}","model":"{model}","engine":"{engine}","success":true,"cost_usd":{cost},"turns":{turns}}'
+
+# On failure:
+PYTHONPATH=~/.aya/src python3 -m aya.workspace memory-log {task_id} '{"task_type":"{type}","model":"{model}","engine":"{engine}","success":false,"cost_usd":{cost},"turns":{turns}}'
+```
+
+This builds the routing history that `memory-suggest` uses in future sessions. Over time, the PM learns which models work best for which task types in this specific project.
+
 ---
 
 ## Step 6: Integration + Verification
@@ -575,6 +606,21 @@ Report format:
 ### Next Steps (if any)
 {remaining issues or suggestions}
 ```
+
+### Save Learned Patterns
+
+If PM discovered project-specific patterns during this session (e.g., coding conventions, architecture decisions, testing requirements), persist them:
+
+```bash
+PYTHONPATH=~/.aya/src python3 -c "
+from aya.memory import AyaMemory
+mem = AyaMemory('.')
+mem.write_pattern('api_style', 'FastAPI with factory pattern, returns {data, error, meta}')
+mem.sync_to_claude_code()
+"
+```
+
+This saves patterns to `~/.aya/memory/<hash>/patterns.md` AND syncs to Claude Code's memory directory so the knowledge persists even outside AYA mode.
 
 ---
 
