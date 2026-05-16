@@ -380,3 +380,79 @@ class TestClaudeCodeSync:
 
         count = mem.sync_to_claude_code()
         assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 — User Profile
+# ---------------------------------------------------------------------------
+
+class TestProfile:
+    def test_empty_profile(self, mem):
+        assert mem.get_profile() == {}
+
+    def test_update_and_read(self, mem):
+        mem.update_profile("role", "Backend developer")
+        profile = mem.get_profile()
+        assert profile["role"] == "Backend developer"
+
+    def test_multiple_sections(self, mem):
+        mem.update_profile("role", "Dev")
+        mem.update_profile("tech_stack", "Python, Go")
+        mem.update_profile("preferences", "Pytest always")
+        profile = mem.get_profile()
+        assert len(profile) == 3
+        assert "Python, Go" in profile["tech_stack"]
+
+    def test_overwrite_section(self, mem):
+        mem.update_profile("role", "Junior dev")
+        mem.update_profile("role", "Senior dev")
+        assert mem.get_profile()["role"] == "Senior dev"
+
+    def test_multiline_content(self, mem):
+        mem.update_profile("preferences", "Line 1\nLine 2\nLine 3")
+        assert "Line 2" in mem.get_profile()["preferences"]
+
+
+class TestObserveUserFeedback:
+    def test_detects_preference(self, mem):
+        result = mem.observe_user_feedback("I prefer small commits")
+        assert result is not None
+        assert "preferences" in result
+
+    def test_detects_role(self, mem):
+        result = mem.observe_user_feedback("I'm a data scientist")
+        assert result is not None
+        assert "role" in result
+
+    def test_detects_tech_stack(self, mem):
+        result = mem.observe_user_feedback("We use PostgreSQL and Redis")
+        assert result is not None
+        assert "tech_stack" in result
+
+    def test_no_signal(self, mem):
+        result = mem.observe_user_feedback("What's the status of task-001?")
+        assert result is None
+
+    def test_case_insensitive(self, mem):
+        result = mem.observe_user_feedback("I PREFER typescript over javascript")
+        assert result is not None
+
+
+class TestWorkerContext:
+    def test_empty_profile_returns_empty(self, mem):
+        assert mem.get_worker_context() == ""
+
+    def test_formats_profile(self, mem):
+        mem.update_profile("role", "Backend dev")
+        mem.update_profile("preferences", "Always write tests")
+        ctx = mem.get_worker_context()
+        assert "User Profile" in ctx
+        assert "Backend dev" in ctx
+        assert "Always write tests" in ctx
+
+    def test_all_keys_present(self, mem):
+        mem.update_profile("a", "val_a")
+        mem.update_profile("b", "val_b")
+        ctx = mem.get_worker_context()
+        assert "**a**" in ctx
+        assert "**b**" in ctx
