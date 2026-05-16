@@ -964,6 +964,7 @@ def _cli_main() -> None:
         print("          cleanup-worktrees, check-env, runtime-dir,")
         print("          route-model, spawn-command, spawn-worker,")
         print("          memory-log, memory-stats, memory-patterns, memory-suggest,")
+        print("          memory-profile, memory-observe, memory-context,")
         print("          setup, models, model-env, self-update, version")
         sys.exit(1)
 
@@ -1224,6 +1225,58 @@ def _cli_main() -> None:
         mem = AyaMemory(str(ws.project_dir))
         suggestion = mem.suggest_model(task_type)
         print(json.dumps(suggestion, indent=2))
+        return
+
+    elif cmd == "memory-profile":
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        if len(args) >= 3:
+            # Set mode: memory-profile KEY "content"
+            key = args[1]
+            content = args[2]
+            mem.update_profile(key, content)
+            print(f"Updated profile: {key}")
+        else:
+            # View mode
+            profile = mem.get_profile()
+            if not profile:
+                print("No user profile yet. Set with: memory-profile KEY \"content\"")
+                print("Keys: role, tech_stack, preferences, coding_style, testing, communication")
+                return
+            for key, content in sorted(profile.items()):
+                print(f"## {key}")
+                print(content)
+                print()
+        return
+
+    elif cmd == "memory-observe":
+        # Analyze a user message for profile signals
+        if len(args) < 2:
+            print("Usage: memory-observe \"user message text\"")
+            sys.exit(1)
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        msg = args[1]
+        signal = mem.observe_user_feedback(msg)
+        if signal:
+            print(json.dumps({"detected": True, "updates": signal}, indent=2))
+            # Auto-apply the observation
+            for key, content in signal.items():
+                mem.update_profile(key, content)
+                print(f"Auto-updated profile: {key}")
+        else:
+            print(json.dumps({"detected": False}, indent=2))
+        return
+
+    elif cmd == "memory-context":
+        # Get worker context string from profile
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        ctx = mem.get_worker_context()
+        if ctx:
+            print(ctx)
+        else:
+            print("(no profile data)")
         return
 
     elif cmd == "self-update":

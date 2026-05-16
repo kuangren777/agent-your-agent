@@ -154,6 +154,96 @@ class AyaMemory:
         return patterns
 
     # ------------------------------------------------------------------
+    # Layer 3: Global Memory — User Profile
+    # ------------------------------------------------------------------
+
+    PROFILE_FILE = "profile.md"
+
+    def get_profile(self) -> Dict[str, str]:
+        """Read the user profile. Returns {section_key: content}."""
+        profile_path = self.global_memory_dir / "profile.md"
+        if not profile_path.exists():
+            return {}
+        # Same parsing as read_patterns() — ## headers as keys
+        text = profile_path.read_text()
+        sections: Dict[str, str] = {}
+        current_key = ""
+        current_lines: List[str] = []
+        for line in text.splitlines():
+            if line.startswith("## "):
+                if current_key:
+                    sections[current_key] = "\n".join(current_lines).strip()
+                current_key = line[3:].strip()
+                current_lines = []
+            else:
+                current_lines.append(line)
+        if current_key:
+            sections[current_key] = "\n".join(current_lines).strip()
+        return sections
+
+    def update_profile(self, key: str, content: str) -> None:
+        """Update a section of the user profile."""
+        self.ensure_dirs()
+        profile = self.get_profile()
+        profile[key] = content
+        lines = []
+        for k, v in sorted(profile.items()):
+            lines.append(f"## {k}\n{v}\n")
+        (self.global_memory_dir / "profile.md").write_text("\n".join(lines))
+
+    def observe_user_feedback(self, user_message: str, context: str = "") -> Optional[Dict[str, str]]:
+        """Analyze a user message for profile-relevant signals.
+
+        Detects patterns like:
+        - "I prefer X" / "always do X" / "don't do X" → preferences
+        - "I'm a backend developer" / "I work on..." → role
+        - "Use pytest not unittest" / "We use TypeScript" → tech_stack
+
+        Returns {key: content} if a profile update is warranted, None otherwise.
+        This is a heuristic — PM should call this on user correction messages.
+        """
+        msg_lower = user_message.lower()
+
+        # Detect preference signals
+        pref_signals = ["i prefer", "always use", "don't use", "never use",
+                        "i like", "i want", "please always", "from now on"]
+        role_signals = ["i'm a", "i am a", "my role", "i work as", "i work on"]
+        tech_signals = ["we use", "our stack", "this project uses", "tech stack"]
+
+        result = None
+
+        for signal in pref_signals:
+            if signal in msg_lower:
+                result = {"preferences": user_message}
+                break
+
+        if not result:
+            for signal in role_signals:
+                if signal in msg_lower:
+                    result = {"role": user_message}
+                    break
+
+        if not result:
+            for signal in tech_signals:
+                if signal in msg_lower:
+                    result = {"tech_stack": user_message}
+                    break
+
+        return result
+
+    def get_worker_context(self) -> str:
+        """Generate a context block from user profile to inject into worker prompts.
+        Returns a formatted string suitable for inclusion in worker prompts."""
+        profile = self.get_profile()
+        if not profile:
+            return ""
+
+        lines = ["## User Profile (from PM memory)"]
+        for key, content in sorted(profile.items()):
+            lines.append(f"**{key}**: {content}")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Layer 3: Global Memory — Preferences
     # ------------------------------------------------------------------
 
