@@ -244,6 +244,65 @@ class AyaMemory:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
+    # Layer 3: Global Memory — Daily Activity Log
+    # ------------------------------------------------------------------
+
+    def log_activity(self, project_name: str, pm_session: str, summary: str,
+                     tasks_completed: int = 0, models_used: Optional[List[str]] = None,
+                     cost_usd: float = 0.0) -> None:
+        """Append a daily activity entry. Called at PM session end."""
+        self.ensure_dirs()
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entry = {
+            "date": today,
+            "project": project_name,
+            "pm_session": pm_session,
+            "summary": summary,
+            "tasks_completed": tasks_completed,
+            "models_used": models_used or [],
+            "cost_usd": cost_usd,
+        }
+        self._append_jsonl(self.global_memory_dir / "activity.jsonl", entry)
+
+    def get_activity(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Read recent activity entries (last N days)."""
+        entries = self._read_jsonl(self.global_memory_dir / "activity.jsonl")
+        if not entries:
+            return []
+        # Filter to last N days
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        return [e for e in entries if e.get("date", "") >= cutoff]
+
+    def get_activity_summary(self, days: int = 7) -> str:
+        """Format recent activity as a human-readable summary."""
+        entries = self.get_activity(days)
+        if not entries:
+            return "No activity in the last {} days.".format(days)
+        lines = []
+        current_date = ""
+        for e in entries:
+            date = e.get("date", "?")
+            if date != current_date:
+                current_date = date
+                lines.append(f"\n### {date}")
+            project = e.get("project", "?")
+            summary = e.get("summary", "?")
+            tasks = e.get("tasks_completed", 0)
+            cost = e.get("cost_usd", 0)
+            models = ", ".join(e.get("models_used", []))
+            line = f"- **{project}**: {summary}"
+            if tasks:
+                line += f" ({tasks} tasks"
+                if models:
+                    line += f", {models}"
+                if cost > 0:
+                    line += f", ${cost:.2f}"
+                line += ")"
+            lines.append(line)
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Layer 3: Global Memory — Preferences
     # ------------------------------------------------------------------
 

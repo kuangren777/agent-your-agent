@@ -964,7 +964,7 @@ def _cli_main() -> None:
         print("          cleanup-worktrees, check-env, runtime-dir,")
         print("          route-model, spawn-command, spawn-worker,")
         print("          memory-log, memory-stats, memory-patterns, memory-suggest,")
-        print("          memory-profile, memory-observe, memory-context,")
+        print("          memory-profile, memory-observe, memory-context, memory-activity,")
         print("          setup, models, model-env, self-update, version")
         sys.exit(1)
 
@@ -1277,6 +1277,16 @@ def _cli_main() -> None:
             print(ctx)
         else:
             print("(no profile data)")
+        return
+
+    elif cmd == "memory-activity":
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        days = 7
+        for i, a in enumerate(args):
+            if a == "--days" and i + 1 < len(args):
+                days = int(args[i + 1])
+        print(mem.get_activity_summary(days))
         return
 
     elif cmd == "self-update":
