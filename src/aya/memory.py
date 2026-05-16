@@ -11,9 +11,20 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Regex for parsing fenced sections in patterns.md / profile.md
+_SECTION_RE = re.compile(r'<!-- section: (.+?) -->\n(.*?)\n<!-- /section -->', re.DOTALL)
+
+
+def _sanitize_key(key: str) -> str:
+    """Sanitize a key for safe use in filenames and markdown headers."""
+    safe = re.sub(r'[/\\.\n\r\x00]', '_', key)
+    safe = safe.lstrip('._-')
+    return safe[:64] or "unnamed"
 
 AYA_HOME = Path.home() / ".aya"
 
@@ -121,16 +132,17 @@ class AyaMemory:
     # ------------------------------------------------------------------
 
     def write_pattern(self, key: str, content: str) -> None:
-        """Write or update a project pattern. Patterns are stored as sections in patterns.md."""
+        """Write or update a project pattern. Patterns are stored as fenced sections in patterns.md."""
         self.ensure_dirs()
+        key = _sanitize_key(key)
         patterns_file = self.project_memory_dir / "patterns.md"
         existing = self.read_patterns()
         existing[key] = content
-        # Write all patterns back
+        # Write all patterns back using fenced format to avoid ## collision
         lines = []
         for k, v in sorted(existing.items()):
-            lines.append(f"## {k}\n{v}\n")
-        patterns_file.write_text("\n".join(lines))
+            lines.append(f"<!-- section: {k} -->\n{v}\n<!-- /section -->")
+        self._write_file_atomic(patterns_file, "\n".join(lines))
 
     def read_patterns(self) -> Dict[str, str]:
         """Read all project patterns. Returns {key: content}."""
@@ -138,20 +150,8 @@ class AyaMemory:
         if not patterns_file.exists():
             return {}
         text = patterns_file.read_text()
-        patterns: Dict[str, str] = {}
-        current_key = ""
-        current_lines: List[str] = []
-        for line in text.splitlines():
-            if line.startswith("## "):
-                if current_key:
-                    patterns[current_key] = "\n".join(current_lines).strip()
-                current_key = line[3:].strip()
-                current_lines = []
-            else:
-                current_lines.append(line)
-        if current_key:
-            patterns[current_key] = "\n".join(current_lines).strip()
-        return patterns
+        matches = _SECTION_RE.findall(text)
+        return {k: v.strip() for k, v in matches}
 
     # ------------------------------------------------------------------
     # Layer 3: Global Memory — User Profile
@@ -164,32 +164,20 @@ class AyaMemory:
         profile_path = self.global_memory_dir / "profile.md"
         if not profile_path.exists():
             return {}
-        # Same parsing as read_patterns() — ## headers as keys
         text = profile_path.read_text()
-        sections: Dict[str, str] = {}
-        current_key = ""
-        current_lines: List[str] = []
-        for line in text.splitlines():
-            if line.startswith("## "):
-                if current_key:
-                    sections[current_key] = "\n".join(current_lines).strip()
-                current_key = line[3:].strip()
-                current_lines = []
-            else:
-                current_lines.append(line)
-        if current_key:
-            sections[current_key] = "\n".join(current_lines).strip()
-        return sections
+        matches = _SECTION_RE.findall(text)
+        return {k: v.strip() for k, v in matches}
 
     def update_profile(self, key: str, content: str) -> None:
         """Update a section of the user profile."""
         self.ensure_dirs()
+        key = _sanitize_key(key)
         profile = self.get_profile()
         profile[key] = content
         lines = []
         for k, v in sorted(profile.items()):
-            lines.append(f"## {k}\n{v}\n")
-        (self.global_memory_dir / "profile.md").write_text("\n".join(lines))
+            lines.append(f"<!-- section: {k} -->\n{v}\n<!-- /section -->")
+        self._write_file_atomic(self.global_memory_dir / "profile.md", "\n".join(lines))
 
     def observe_user_feedback(self, user_message: str, context: str = "") -> Optional[Dict[str, str]]:
         """Analyze a user message for profile-relevant signals.
@@ -313,6 +301,7 @@ class AyaMemory:
         prefs[key] = value
         self._write_json(self.global_memory_dir / "preferences.json", prefs)
 
+
     def get_preferences(self) -> Dict[str, Any]:
         """Read all global user preferences."""
         pref_file = self.global_memory_dir / "preferences.json"
@@ -423,16 +412,17 @@ class AyaMemory:
         patterns = self.read_patterns()
         count = 0
         for key, content in patterns.items():
-            memory_file = cc_memory_dir / f"aya-{key}.md"
+            safe_key = _sanitize_key(key)
+            memory_file = cc_memory_dir / f"aya-{safe_key}.md"
             frontmatter = (
                 f"---\n"
-                f"name: aya-{key}\n"
-                f"description: \"AYA learned pattern: {key}\"\n"
+                f"name: aya-{safe_key}\n"
+                f"description: \"AYA learned pattern: {safe_key}\"\n"
                 f"metadata:\n"
                 f"  type: project\n"
                 f"---\n\n"
             )
-            memory_file.write_text(frontmatter + content + "\n")
+            self._write_file_atomic(memory_file, frontmatter + content + "\n")
             count += 1
 
         # Update MEMORY.md index
@@ -442,8 +432,9 @@ class AyaMemory:
             existing_lines = [l for l in memory_index.read_text().splitlines()
                               if not l.strip().startswith("- [aya-")]
         for key in sorted(patterns.keys()):
-            existing_lines.append(f"- [aya-{key}](aya-{key}.md) — AYA learned: {key}")
-        memory_index.write_text("\n".join(existing_lines) + "\n")
+            safe_key = _sanitize_key(key)
+            existing_lines.append(f"- [aya-{safe_key}](aya-{safe_key}.md) — AYA learned: {safe_key}")
+        self._write_file_atomic(memory_index, "\n".join(existing_lines) + "\n")
 
         return count
 
@@ -482,6 +473,13 @@ class AyaMemory:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _write_file_atomic(self, path: Path, content: str) -> None:
+        """Write content to file atomically via tmp + os.replace."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(content)
+        os.replace(str(tmp), str(path))
 
     def _append_jsonl(self, path: Path, data: Dict[str, Any]) -> None:
         """Append a JSON line to a file with file locking."""
