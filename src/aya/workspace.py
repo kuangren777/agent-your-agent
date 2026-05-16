@@ -963,6 +963,7 @@ def _cli_main() -> None:
         print("          check-file-conflicts, create-worktree, remove-worktree,")
         print("          cleanup-worktrees, check-env, runtime-dir,")
         print("          route-model, spawn-command, spawn-worker,")
+        print("          memory-log, memory-stats, memory-patterns, memory-suggest,")
         print("          setup, models, model-env, self-update, version")
         sys.exit(1)
 
@@ -1116,8 +1117,19 @@ def _cli_main() -> None:
             print("Task types: architecture, complex_refactor, implementation,")
             print("            testing, boilerplate, review, documentation, debugging")
             sys.exit(1)
-        result = route_model(task_type)
-        print(json.dumps(result, indent=2))
+        # First check memory for adaptive suggestion
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        suggestion = mem.suggest_model(task_type)
+        if suggestion.get("source") == "history":
+            # Memory has a suggestion based on past performance
+            suggestion["note"] = "Based on routing history for this project"
+            print(json.dumps(suggestion, indent=2))
+        else:
+            # Fall back to static routing table
+            result = route_model(task_type)
+            result["note"] = "Static routing table (no history yet)"
+            print(json.dumps(result, indent=2))
         return
 
     elif cmd == "spawn-command":
@@ -1154,6 +1166,64 @@ def _cli_main() -> None:
         prompt_text = sys.stdin.read()
         result = ws.prepare_spawn(task_id, prompt_text)
         print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+
+    elif cmd == "memory-log":
+        if len(args) < 3:
+            print("Usage: memory-log TASK_ID JSON")
+            sys.exit(1)
+        task_id = args[1]
+        data = json.loads(args[2])
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        mem.log_routing(
+            task_id=task_id,
+            task_type=data.get("task_type", ""),
+            model=data.get("model", ""),
+            engine=data.get("engine", ""),
+            success=data.get("success", True),
+            cost_usd=data.get("cost_usd", 0),
+            turns=data.get("turns", 0),
+            duration_ms=data.get("duration_ms", 0),
+        )
+        print(f"Logged routing for {task_id}: {data.get('model')} {'✓' if data.get('success') else '✗'}")
+        return
+
+    elif cmd == "memory-stats":
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        stats = mem.get_model_stats()
+        if not stats:
+            print("No routing history yet.")
+            return
+        print(f"{'Model':25s} {'Total':6s} {'Success':8s} {'Rate':6s} {'Avg Cost':9s} {'Avg Turns':10s}")
+        print("-" * 70)
+        for model, s in sorted(stats.items(), key=lambda x: -x[1]["success_rate"]):
+            print(f"{model:25s} {s['total']:6d} {s['successes']:8d} {s['success_rate']:5.0%} ${s['avg_cost']:7.2f} {s['avg_turns']:9.1f}")
+        return
+
+    elif cmd == "memory-patterns":
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        patterns = mem.read_patterns()
+        if not patterns:
+            print("No patterns stored yet.")
+            return
+        for key, content in sorted(patterns.items()):
+            print(f"## {key}")
+            print(content)
+            print()
+        return
+
+    elif cmd == "memory-suggest":
+        if len(args) < 2:
+            print("Usage: memory-suggest TASK_TYPE")
+            sys.exit(1)
+        task_type = args[1]
+        from aya.memory import AyaMemory
+        mem = AyaMemory(str(ws.project_dir))
+        suggestion = mem.suggest_model(task_type)
+        print(json.dumps(suggestion, indent=2))
         return
 
     elif cmd == "self-update":
